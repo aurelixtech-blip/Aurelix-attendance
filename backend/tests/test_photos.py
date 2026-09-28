@@ -337,6 +337,55 @@ def test_admin_can_retrieve_photo(monkeypatch):
         clear_overrides()
 
 
+def test_admin_attendance_includes_records_with_missing_employees(monkeypatch):
+    attendance_record = {
+        "attendance_id": "att-missing-employee",
+        "employee_id": "EMP-REMOVED",
+        "user_name": "Former Employee",
+        "date": "2026-09-24",
+        "final_status": "PRESENT",
+    }
+
+    class Cursor:
+        def __init__(self, records):
+            self.records = records
+
+        def sort(self, *_args):
+            return self
+
+        def limit(self, *_args):
+            return self
+
+        def __iter__(self):
+            return iter(self.records)
+
+    class AttendanceCollection:
+        def find(self, _query):
+            return Cursor([attendance_record])
+
+    class EmployeeCollection:
+        def find_one(self, *_args):
+            return None
+
+        def find(self, *_args):
+            return Cursor([])
+
+    db = SimpleNamespace(attendance=AttendanceCollection(), employees=EmployeeCollection())
+    monkeypatch.setattr(attendance_api, "get_db", lambda: db)
+    override_admin()
+    client = TestClient(app)
+    try:
+        response = client.get("/api/attendance/admin?date=2026-09-24")
+
+        assert response.status_code == 200
+        records = response.json()
+        assert len(records) == 1
+        assert records[0]["attendance_id"] == "att-missing-employee"
+        assert records[0]["employee"] == {"full_name": "Former Employee", "department": ""}
+    finally:
+        clear_overrides()
+
+
 def test_employee_receives_403_for_admin_photo_retrieval():
     override_employee()
     client = TestClient(app)

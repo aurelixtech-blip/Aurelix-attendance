@@ -101,7 +101,11 @@ def all_attendance(_claims: dict = Depends(require_admin), date: str | None = Qu
     for item in db.attendance.find(query).sort("date", -1).limit(500):
         record = public_attendance(item)
         employee = db.employees.find_one({"employee_id": item["employee_id"]}, {"password_hash": 0})
-        record["employee"] = {"full_name": employee.get("full_name"), "department": employee.get("department")} if employee else None
+        record["employee"] = (
+            {"full_name": employee.get("full_name"), "department": employee.get("department")}
+            if employee
+            else {"full_name": record.get("user_name") or record.get("employee_id"), "department": ""}
+        )
         records.append(record)
     if date and not employee_id:
         existing = {item["employee_id"] for item in records}
@@ -109,7 +113,7 @@ def all_attendance(_claims: dict = Depends(require_admin), date: str | None = Qu
             if employee["employee_id"] in existing:
                 continue
             records.append({"attendance_id": f"absent-{employee['employee_id']}-{date}", "employee_id": employee["employee_id"], "user_name": employee.get("full_name"), "date": date, "check_in_time": None, "check_in_location": None, "check_in_photo_available": False, "check_out_time": None, "check_out_location": None, "check_out_photo_available": False, "final_status": "ABSENT", "employee": {"full_name": employee["full_name"], "department": employee.get("department", "")}})
-        records.sort(key=lambda item: item["employee"].get("full_name", ""))
+        records.sort(key=lambda item: (item.get("employee") or {}).get("full_name", ""))
     return records
 
 @router.get("/admin/month")
