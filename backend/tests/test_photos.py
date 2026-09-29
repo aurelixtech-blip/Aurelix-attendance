@@ -490,7 +490,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def test_frontend_camera_flow_uses_inline_getusermedia():
     source = (REPO_ROOT / "frontend" / "src" / "LocationAttendance.jsx").read_text(encoding="utf-8")
     assert "getUserMedia" in source
-    assert 'facingMode: "environment"' in source
+    assert "useState('environment')" in source
+    assert "facingMode: { exact: cameraFacingMode }" in source
+    assert "setCameraFacingMode(mode => mode === 'environment' ? 'user' : 'environment')" in source
     assert "Take Photo" in source
     assert "Retake" in source
     assert "Use Photo & ${actionLabel}" in source

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Camera, Check, MapPin, X } from 'lucide-react'
+import { Camera, Check, MapPin, SwitchCamera, X } from 'lucide-react'
 import api from './services/api'
 import { formatKolkataDate, formatKolkataTime, kolkataDateKey } from './time'
 
@@ -79,6 +79,7 @@ export default function LocationAttendance() {
   const [locationDiagnostics, setLocationDiagnostics] = useState(null)
   const [cameraPhase, setCameraPhase] = useState('idle')
   const [cameraSession, setCameraSession] = useState(0)
+  const [cameraFacingMode, setCameraFacingMode] = useState('environment')
   const [photoFile, setPhotoFile] = useState(null)
   const [photoPreview, setPhotoPreview] = useState('')
   const videoRef = useRef(null)
@@ -111,11 +112,13 @@ export default function LocationAttendance() {
         if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('unsupported'), { name: 'SecurityError' })
         if (!window.isSecureContext) throw Object.assign(new Error('insecure'), { name: 'SecurityError' })
         let stream
+        let usedFallback = false
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: cameraFacingMode } }, audio: false })
         } catch (firstError) {
           if (firstError?.name === 'NotAllowedError' || firstError?.name === 'PermissionDeniedError') throw firstError
           stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+          usedFallback = true
         }
         if (cancelled) {
           stopMediaStream(stream)
@@ -125,6 +128,10 @@ export default function LocationAttendance() {
         if (videoRef.current) {
           videoRef.current.srcObject = stream
           await videoRef.current.play()
+        }
+        if (usedFallback) {
+          const requestedCamera = cameraFacingMode === 'environment' ? 'rear' : 'front'
+          setError(`The ${requestedCamera} camera is unavailable. Using the default camera instead.`)
         }
       } catch (cameraError) {
         if (cancelled) return
@@ -139,7 +146,7 @@ export default function LocationAttendance() {
       streamRef.current = null
       if (videoRef.current) videoRef.current.srcObject = null
     }
-  }, [cameraPhase, cameraSession])
+  }, [cameraPhase, cameraSession, cameraFacingMode])
 
   async function getLocationOnce(onStatus) {
     const diagnosticBase = { device: detectDevice(), browser: detectBrowser(), secureContext: window.isSecureContext, permission: 'unknown', readings: [], selected: null, watchDurationMs: 0 }
@@ -204,6 +211,7 @@ export default function LocationAttendance() {
     setError('')
     setMessage('')
     clearCapturedPhoto()
+    setCameraFacingMode('environment')
     setCameraSession(value => value + 1)
     setCameraPhase('live')
   }
@@ -220,6 +228,12 @@ export default function LocationAttendance() {
     clearCapturedPhoto()
     setCameraSession(value => value + 1)
     setCameraPhase('live')
+  }
+
+  function flipCamera() {
+    setError('')
+    setCameraFacingMode(mode => mode === 'environment' ? 'user' : 'environment')
+    setCameraSession(value => value + 1)
   }
 
   function takePhoto() {
@@ -314,6 +328,7 @@ export default function LocationAttendance() {
         </div>
         <div className="photo-actions">
           {cameraPhase === 'live' && <>
+            <button className="ghost-button" type="button" onClick={flipCamera} disabled={busy}><SwitchCamera size={16}/>Flip Camera</button>
             <button className="primary-button" type="button" onClick={takePhoto} disabled={busy}>Take Photo</button>
             <button className="ghost-button" type="button" onClick={cancelCamera} disabled={busy}>Cancel</button>
           </>}

@@ -56,6 +56,18 @@ def excel_cell_value(value):
     return value.isoformat() if isinstance(value, datetime) else value
 
 
+def excel_working_hours(check_in, check_out):
+    if not check_in or not check_out:
+        return "—"
+    try:
+        check_in_time = datetime.fromisoformat(check_in) if isinstance(check_in, str) else check_in
+        check_out_time = datetime.fromisoformat(check_out) if isinstance(check_out, str) else check_out
+        duration = check_out_time - check_in_time
+        return duration if duration >= timedelta(0) else "—"
+    except (TypeError, ValueError, OverflowError):
+        return "—"
+
+
 def resolve_export_date_range(
     export_range: Literal["day", "week", "month", "months", "year"],
     anchor_date: date | None,
@@ -162,7 +174,7 @@ def export_attendance(
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Attendance"
-    headers = ["Date", "Employee ID", "Employee", "Email", "Department", "Check In", "Check In Location", "Check-in Photo", "Check Out", "Check Out Location", "Check-out Photo", "Status"]
+    headers = ["Date", "Employee ID", "Employee", "Email", "Department", "Check In", "Check In Location", "Check-in Photo", "Check Out", "Working Hours", "Check Out Location", "Check-out Photo", "Status"]
     sheet.append(headers)
     for cell in sheet[1]:
         cell.font = Font(bold=True, color="FFFFFF")
@@ -171,21 +183,23 @@ def export_attendance(
     for record in records:
         employee = employees.get(record.get("employee_id"), {})
         row_number = sheet.max_row + 1
+        working_hours = excel_working_hours(record.get("check_in_time"), record.get("check_out_time"))
         sheet.append([
             record.get("date"), record.get("employee_id"), employee.get("full_name", ""), employee.get("email", ""),
             employee.get("department", ""), excel_cell_value(record.get("check_in_time")), format_location(record.get("check_in_location")),
             None,
-            excel_cell_value(record.get("check_out_time")), format_location(record.get("check_out_location")),
+            excel_cell_value(record.get("check_out_time")), working_hours, format_location(record.get("check_out_location")),
             None,
             record.get("final_status"),
         ])
+        sheet[f"J{row_number}"].number_format = "[h]:mm:ss"
         has_check_in_photo = embed_attendance_photo(sheet, f"H{row_number}", record.get("check_in_photo_reference"))
-        has_check_out_photo = embed_attendance_photo(sheet, f"K{row_number}", record.get("check_out_photo_reference"))
+        has_check_out_photo = embed_attendance_photo(sheet, f"L{row_number}", record.get("check_out_photo_reference"))
         if has_check_in_photo or has_check_out_photo:
             sheet.row_dimensions[row_number].height = 115
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
-    widths = [14, 16, 24, 30, 20, 23, 28, 31, 23, 28, 31, 14]
+    widths = [14, 16, 24, 30, 20, 23, 28, 31, 23, 14, 28, 31, 14]
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[chr(64 + index)].width = width
     for row in sheet.iter_rows(min_row=2):

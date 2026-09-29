@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -128,7 +128,7 @@ def test_empty_export_has_headers_and_no_data_rows(monkeypatch):
     try:
         sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
         assert sheet.max_row == 1
-        assert [cell.value for cell in sheet[1]] == ["Date", "Employee ID", "Employee", "Email", "Department", "Check In", "Check In Location", "Check-in Photo", "Check Out", "Check Out Location", "Check-out Photo", "Status"]
+        assert [cell.value for cell in sheet[1]] == ["Date", "Employee ID", "Employee", "Email", "Department", "Check In", "Check In Location", "Check-in Photo", "Check Out", "Working Hours", "Check Out Location", "Check-out Photo", "Status"]
     finally:
         app.dependency_overrides.clear()
 
@@ -147,6 +147,40 @@ def test_export_serializes_timezone_aware_mongo_timestamps(monkeypatch):
         app.dependency_overrides.clear()
 
 
+def test_export_writes_working_hours_as_excel_duration_and_marks_open_records(monkeypatch):
+    records = [
+        record("2026-09-23", check_in_time="2026-09-23T09:30:15+05:30", check_out_time="2026-09-23T18:10:42+05:30"),
+        record("2026-09-23", check_in_time="2026-09-23T09:30:15+05:30", check_out_time=None),
+    ]
+    client, _attendance = export_client(monkeypatch, records)
+    try:
+        sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
+
+        assert sheet["J2"].value == timedelta(hours=8, minutes=40, seconds=27)
+        assert sheet["J2"].number_format == "[h]:mm:ss"
+        assert sheet["J3"].value == "—"
+        assert sheet["J3"].number_format == "[h]:mm:ss"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize(
+    ("check_in_time", "check_out_time"),
+    [
+        ("invalid", "2026-09-23T18:10:42+05:30"),
+        ("2026-09-23T18:10:42+05:30", "2026-09-23T09:30:15+05:30"),
+        (None, "2026-09-23T18:10:42+05:30"),
+    ],
+)
+def test_export_marks_invalid_or_negative_working_hours(monkeypatch, check_in_time, check_out_time):
+    client, _attendance = export_client(monkeypatch, [record("2026-09-23", check_in_time=check_in_time, check_out_time=check_out_time)])
+    try:
+        sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
+        assert sheet["J2"].value == "—"
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_export_embeds_retained_check_in_and_check_out_photos(monkeypatch):
     image_buffer = BytesIO()
     Image.new("RGB", (800, 400), "navy").save(image_buffer, format="JPEG")
@@ -157,7 +191,7 @@ def test_export_embeds_retained_check_in_and_check_out_photos(monkeypatch):
         sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
         assert len(sheet._images) == 2
         assert sheet["H2"].value is None
-        assert sheet["K2"].value is None
+        assert sheet["L2"].value is None
         assert sheet.row_dimensions[2].height == 115
         assert all(image.width <= 200 and image.height <= 150 for image in sheet._images)
     finally:
@@ -173,7 +207,7 @@ def test_expired_or_missing_photos_do_not_fail_export(monkeypatch):
     try:
         sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
         assert sheet["H2"].value == "Expired / unavailable"
-        assert sheet["K2"].value == "Expired / unavailable"
+        assert sheet["L2"].value == "Expired / unavailable"
         assert not sheet._images
     finally:
         app.dependency_overrides.clear()
