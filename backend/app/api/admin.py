@@ -1,7 +1,8 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 import secrets
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import Response
@@ -37,6 +38,7 @@ def require_photo_cleanup_access(
     raise HTTPException(status_code=403, detail="Photo cleanup requires administrator access or a valid cleanup secret")
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+KOLKATA_TIME_ZONE = ZoneInfo("Asia/Kolkata")
 
 def format_location(location: dict | None) -> str:
     if not location or location.get("latitude") is None or location.get("longitude") is None:
@@ -51,9 +53,19 @@ def format_location(location: dict | None) -> str:
     return f"{location['latitude']:.5f}, {location['longitude']:.5f}{suffix}"
 
 
-def excel_cell_value(value):
-    """OpenPyXL cannot serialize timezone-aware datetimes from MongoDB."""
-    return value.isoformat() if isinstance(value, datetime) else value
+def excel_time_value(value):
+    if value is None or value == "":
+        return "—"
+    try:
+        timestamp = datetime.fromisoformat(value) if isinstance(value, str) else value
+        if not isinstance(timestamp, datetime):
+            return "—"
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        formatted_time = timestamp.astimezone(KOLKATA_TIME_ZONE).strftime("%I:%M:%S %p").lower()
+        return f"{formatted_time} IST"
+    except (TypeError, ValueError, OverflowError):
+        return "—"
 
 
 def excel_working_hours(check_in, check_out):
@@ -162,6 +174,11 @@ def export_attendance(
         {"date": {"$gte": start_date.isoformat(), "$lte": end_date.isoformat()}},
         {"_id": 0},
     ).sort([("date", -1), ("employee_id", 1)]))
+    active_employees = list(db.employees.find(
+        {"role": "employee", "is_active": True},
+        {"employee_id": 1, "full_name": 1, "email": 1, "department": 1},
+    ))
+    active_employees.sort(key=lambda employee: employee.get("employee_id") or "")
     employee_ids = {record.get("employee_id") for record in records}
     employees = {
         employee["employee_id"]: employee
@@ -170,6 +187,37 @@ def export_attendance(
             {"employee_id": 1, "full_name": 1, "email": 1, "department": 1},
         )
     }
+    employees.update({employee["employee_id"]: employee for employee in active_employees})
+
+    records_by_employee_date = {}
+    for record in records:
+        key = (record.get("employee_id"), record.get("date"))
+        records_by_employee_date.setdefault(key, []).append(record)
+
+    export_records = []
+    for day_offset in range((end_date - start_date).days + 1):
+        current_date = (start_date + timedelta(days=day_offset)).isoformat()
+        for employee in active_employees:
+            employee_id = employee["employee_id"]
+            matching_records = records_by_employee_date.pop((employee_id, current_date), [])
+            if matching_records:
+                export_records.extend(matching_records)
+            else:
+                export_records.append({
+                    "date": current_date,
+                    "employee_id": employee_id,
+                    "user_name": employee.get("full_name"),
+                    "check_in_time": None,
+                    "check_in_location": None,
+                    "check_out_time": None,
+                    "check_out_location": None,
+                    "final_status": "ABSENT",
+                })
+
+    for remaining_records in records_by_employee_date.values():
+        export_records.extend(remaining_records)
+    export_records.sort(key=lambda record: str(record.get("employee_id") or ""))
+    export_records.sort(key=lambda record: str(record.get("date") or ""), reverse=True)
 
     workbook = Workbook()
     sheet = workbook.active
@@ -180,15 +228,16 @@ def export_attendance(
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="102B42")
         cell.alignment = Alignment(horizontal="center", vertical="center")
-    for record in records:
+    for record in export_records:
         employee = employees.get(record.get("employee_id"), {})
         row_number = sheet.max_row + 1
+        is_absent = record.get("final_status") == "ABSENT"
         working_hours = excel_working_hours(record.get("check_in_time"), record.get("check_out_time"))
         sheet.append([
-            record.get("date"), record.get("employee_id"), employee.get("full_name", ""), employee.get("email", ""),
-            employee.get("department", ""), excel_cell_value(record.get("check_in_time")), format_location(record.get("check_in_location")),
+            record.get("date"), record.get("employee_id"), employee.get("full_name") or record.get("user_name") or record.get("employee_id"), employee.get("email", ""),
+            employee.get("department", ""), excel_time_value(record.get("check_in_time")), "—" if is_absent and not record.get("check_in_location") else format_location(record.get("check_in_location")),
             None,
-            excel_cell_value(record.get("check_out_time")), working_hours, format_location(record.get("check_out_location")),
+            excel_time_value(record.get("check_out_time")), working_hours, "—" if is_absent and not record.get("check_out_location") else format_location(record.get("check_out_location")),
             None,
             record.get("final_status"),
         ])
