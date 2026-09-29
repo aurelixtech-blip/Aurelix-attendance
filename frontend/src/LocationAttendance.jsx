@@ -323,7 +323,7 @@ export default function LocationAttendance() {
       {cameraPhase === 'idle' && <button className="primary-button action-button" type="button" disabled={busy || (action === 'check_in' && todayRecord?.check_in_time) || (action === 'check_out' && todayRecord?.check_out_time)} onClick={openCamera}><Camera size={18}/>{actionLabel}</button>}
       {cameraPhase !== 'idle' && <div className="camera-capture" aria-label={`${actionLabel} camera`}>
         <div className="camera-stage">
-          {cameraPhase === 'live' && <video ref={videoRef} className="camera-preview" autoPlay playsInline muted />}
+          {cameraPhase === 'live' && <video ref={videoRef} className={cameraFacingMode === 'user' ? 'camera-preview front-camera' : 'camera-preview'} autoPlay playsInline muted />}
           {cameraPhase === 'preview' && photoPreview && <img src={photoPreview} alt="Captured attendance photo" />}
         </div>
         <div className="photo-actions">

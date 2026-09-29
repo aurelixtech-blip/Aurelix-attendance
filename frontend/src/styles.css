@@ -146,5 +146,6 @@ html{overflow-x:hidden}body{overflow-x:hidden}.app-shell,.main-content,.panel,.h
 
 .camera-capture .photo-actions{grid-template-columns:repeat(3,minmax(0,1fr))}
 .camera-capture .photo-actions button{min-width:0;justify-content:center;gap:6px;padding-inline:8px}
+.camera-preview.front-camera{transform:scaleX(-1)}
 @media(max-width:600px){.camera-capture .photo-actions button{font-size:12px;padding-inline:5px}}
 @media(max-width:359px){.camera-capture .photo-actions{grid-template-columns:1fr}}
