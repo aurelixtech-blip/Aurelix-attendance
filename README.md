@@ -83,7 +83,17 @@ Open `http://localhost:5173`.
 | `PHOTO_RETENTION_HOURS` | Attendance photo lifetime in GridFS; defaults to 24 |
 | `PHOTO_CLEANUP_INTERVAL_SECONDS` | How often a long-running API process deletes expired photos; defaults to 900. Set to `0` to disable the in-process loop |
 | `PHOTO_CLEANUP_SECRET` | Shared secret for the protected photo cleanup endpoint used by external cron jobs |
+| `EMAIL_PROVIDER` | `mock` for development/tests or `smtp` for password-recovery email delivery |
+| `SMTP_HOST` | SMTP server hostname, such as `smtp.gmail.com` |
+| `SMTP_PORT` | SMTP port; defaults to `587` |
+| `SMTP_USERNAME` | Backend-only SMTP account username |
+| `SMTP_PASSWORD` | Backend-only SMTP password or Gmail App Password |
+| `SMTP_FROM_EMAIL` | Verified sender email address |
+| `SMTP_FROM_NAME` | Sender display name; defaults to Aurelix Smart Attendance |
+| `SMTP_USE_TLS` | Start TLS before SMTP authentication; defaults to `true` |
 | `VITE_API_URL` | Frontend API base URL |
+
+Password recovery uses the account's separately registered, verified recovery email and never sends OTPs by SMS. `EMAIL_PROVIDER=mock` is the default for local development and tests; it captures messages in process and performs no network delivery. Production can use `EMAIL_PROVIDER=smtp` with the SMTP settings above. Keep SMTP credentials exclusively in the backend environment, never in React/Vite variables.
 
 ### Vercel production configuration
 
@@ -99,6 +109,14 @@ Configure these Vercel Production environment variables before using login or at
 | `JWT_ALGORITHM` | Normally `HS256` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Production token lifetime |
 | `CORS_ORIGINS` | JSON array containing the deployed Vercel origin, for example `["https://attendance-system-rho-six.vercel.app"]` |
+| `EMAIL_PROVIDER` | `smtp` |
+| `SMTP_HOST` | `smtp.gmail.com` |
+| `SMTP_PORT` | `587` |
+| `SMTP_USERNAME` | Aurelix sender Gmail address; backend-only |
+| `SMTP_PASSWORD` | Gmail App Password stored as a Vercel secret |
+| `SMTP_FROM_EMAIL` | Aurelix sender Gmail address |
+| `SMTP_FROM_NAME` | `Aurelix Smart Attendance` |
+| `SMTP_USE_TLS` | `true` |
 
 The backend must use a hosted MongoDB/Atlas instance. The local default `mongodb://localhost:27017` is only suitable for local development and causes production login requests to fail because Vercel cannot access the developer machine's MongoDB.
 
@@ -118,7 +136,7 @@ $env:PYTHONPATH = (Get-Location).Path
 python scripts/create_admin.py
 ```
 
-The script prompts for credentials unless `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME`, and `ADMIN_EMPLOYEE_ID` are set in the process environment. The password is hashed with bcrypt.
+The script prompts for credentials and a separate recovery email unless `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `ADMIN_EMPLOYEE_ID`, and `ADMIN_RECOVERY_EMAIL` are set in the process environment. The recovery email is validated and remains unverified until its OTP is confirmed in People. The password is hashed with bcrypt.
 
 Sign in as the admin and open **People** to create and manage employees.
 

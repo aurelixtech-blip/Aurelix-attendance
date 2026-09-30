@@ -81,28 +81,32 @@ def excel_working_hours(check_in, check_out):
 
 
 def resolve_export_date_range(
-    export_range: Literal["day", "week", "month", "months", "year"],
+    export_range: Literal["day", "custom", "month", "months", "year"],
     anchor_date: date | None,
-    start_month: date | None,
-    end_month: date | None,
+    start_date: date | None,
+    end_date: date | None,
 ) -> tuple[date, date]:
     """Normalize export inputs into the server-controlled inclusive date range."""
+    if export_range == "custom":
+        if not start_date or not end_date:
+            raise HTTPException(status_code=422, detail="Start and end dates are required for a custom date range")
+        if start_date > end_date:
+            raise HTTPException(status_code=422, detail="Start date must not be after end date")
+        return start_date, end_date
+
     if export_range == "months":
-        if not start_month or not end_month:
+        if not start_date or not end_date:
             raise HTTPException(status_code=422, detail="Start and end months are required for a multiple-month export")
-        start_date = start_month.replace(day=1)
-        end_month_start = end_month.replace(day=1)
-        if start_date > end_month_start:
+        start_month = start_date.replace(day=1)
+        end_month_start = end_date.replace(day=1)
+        if start_month > end_month_start:
             raise HTTPException(status_code=422, detail="Start month must not be after end month")
         next_month = (end_month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
-        return start_date, next_month - timedelta(days=1)
+        return start_month, next_month - timedelta(days=1)
 
     selected_date = anchor_date or date.today()
     if export_range == "day":
         return selected_date, selected_date
-    if export_range == "week":
-        start_date = selected_date - timedelta(days=selected_date.weekday())
-        return start_date, start_date + timedelta(days=6)
     if export_range == "month":
         start_date = selected_date.replace(day=1)
         next_month = (start_date.replace(day=28) + timedelta(days=4)).replace(day=1)
@@ -113,7 +117,7 @@ def resolve_export_date_range(
 def export_filename(export_range: str, start_date: date, end_date: date) -> str:
     if export_range == "day":
         suffix = start_date.isoformat()
-    elif export_range == "week":
+    elif export_range == "custom":
         suffix = f"{start_date.isoformat()}-to-{end_date.isoformat()}"
     elif export_range == "month":
         suffix = start_date.strftime("%Y-%m")
@@ -158,16 +162,16 @@ def embed_attendance_photo(sheet, cell_coordinate: str, reference: dict | None) 
 
 @router.get("/export")
 def export_attendance(
-    export_range: Literal["day", "week", "month", "months", "year"] = Query("day", alias="range"),
+    export_range: Literal["day", "custom", "month", "months", "year"] = Query("day", alias="range"),
     anchor_date: date | None = Query(default=None, alias="date"),
-    start_month: date | None = Query(default=None, alias="start_date"),
-    end_month: date | None = Query(default=None, alias="end_date"),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
     _claims: dict = Depends(require_admin),
 ):
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
 
-    start_date, end_date = resolve_export_date_range(export_range, anchor_date, start_month, end_month)
+    start_date, end_date = resolve_export_date_range(export_range, anchor_date, start_date, end_date)
 
     db = get_db()
     records = list(db.attendance.find(

@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     photo_retention_hours: int = Field(default=24, validation_alias="PHOTO_RETENTION_HOURS")
     photo_cleanup_interval_seconds: int = Field(default=900, validation_alias="PHOTO_CLEANUP_INTERVAL_SECONDS")
     photo_cleanup_secret: str | None = Field(default=None, validation_alias="PHOTO_CLEANUP_SECRET")
+    email_provider: str = Field(default="mock", validation_alias="EMAIL_PROVIDER")
+    smtp_host: str | None = Field(default=None, validation_alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
+    smtp_username: str | None = Field(default=None, validation_alias="SMTP_USERNAME")
+    smtp_password: str | None = Field(default=None, validation_alias="SMTP_PASSWORD")
+    smtp_from_email: str | None = Field(default=None, validation_alias="SMTP_FROM_EMAIL")
+    smtp_from_name: str = Field(default="Aurelix Smart Attendance", validation_alias="SMTP_FROM_NAME")
+    smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_USE_TLS")
 
     @field_validator("cors_origins", mode="before")
     @classmethod

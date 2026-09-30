@@ -20,17 +20,13 @@ function statusBadgeClass(status) {
   return status === 'ABSENT' ? 'badge absent' : 'badge verified'
 }
 
-function dateValue(value) {
-  const [year, month, day] = value.split('-').map(Number)
-  return new Date(year, month - 1, day)
-}
-
-function formatDateValue(value) {
-  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
-}
-
 function exportDetails(criteria) {
   const params = new URLSearchParams({ range: criteria.range })
+  if (criteria.range === 'custom') {
+    params.set('start_date', criteria.startDate)
+    params.set('end_date', criteria.endDate)
+    return { query: params.toString(), filename: `aurelix-attendance-custom-${criteria.startDate}-to-${criteria.endDate}.xlsx` }
+  }
   if (criteria.range === 'months') {
     params.set('start_date', `${criteria.startMonth}-01`)
     params.set('end_date', `${criteria.endMonth}-01`)
@@ -45,12 +41,7 @@ function exportDetails(criteria) {
     return { query: params.toString(), filename: `aurelix-attendance-year-${criteria.year}.xlsx` }
   }
   params.set('date', criteria.date)
-  if (criteria.range === 'day') return { query: params.toString(), filename: `aurelix-attendance-day-${criteria.date}.xlsx` }
-  const start = dateValue(criteria.date)
-  start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
-  const end = new Date(start)
-  end.setDate(end.getDate() + 6)
-  return { query: params.toString(), filename: `aurelix-attendance-week-${formatDateValue(start)}-to-${formatDateValue(end)}.xlsx` }
+  return { query: params.toString(), filename: `aurelix-attendance-day-${criteria.date}.xlsx` }
 }
 
 async function exportErrorMessage(error) {
@@ -82,21 +73,99 @@ function Shell({ user, onLogout, children }) {
 
 function Login({ onLogin }) {
   const [form, setForm] = useState({ email: '', password: '' })
+  const [screen, setScreen] = useState('login')
+  const [recovery, setRecovery] = useState({ recovery_email: '', otp: '', challengeToken: '', resetToken: '', maskedEmail: '' })
   const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
-  async function submit(event) {
+
+  function backToLogin() {
+    setScreen('login')
+    setError('')
+    setMessage('')
+    setForm(current => ({ ...current, password: '' }))
+  }
+
+  async function submitLogin(event) {
     event.preventDefault()
     setError('')
+    setBusy(true)
     try {
       const { data } = await api.post('/api/auth/login', form)
       localStorage.setItem('aurelix_token', data.access_token)
       onLogin(data.user)
       navigate(data.user.role === 'admin' ? '/admin' : '/attendance')
     } catch (err) {
-      setError(err.response?.data?.detail || 'Unable to sign in right now.')
+      setError(err.response ? 'Incorrect email or password.' : 'Unable to sign in right now. Please check your connection.')
+    } finally {
+      setBusy(false)
     }
   }
-  return <div className="login-page"><div className="login-visual"><div className="brand"><Logo /></div><div className="visual-copy"><span className="eyebrow cyan">ATTENDANCE / TIME / PLACE</span><h1>Presence, recorded.</h1><p>Check in and check out with a secure account, server time, and a one-time location capture.</p></div><div className="signal-grid"><span><b>01</b> SECURE LOGIN</span><span><b>02</b> SERVER TIME</span><span><b>03</b> LOCATION STORED</span></div></div><form className="login-card" onSubmit={submit}><span className="eyebrow">WELCOME BACK</span><h2>Sign in to your workspace</h2><p className="muted">Use your Aurelix credentials to continue.</p><label>Work email<input type="email" required value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} placeholder="you@aurelix.com" /></label><label>Password<input type="password" required value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} placeholder="Password" /></label>{error && <div className="error-box"><X size={16}/>{error}</div>}<button className="primary-button" type="submit">Enter workspace <ArrowRight size={17}/></button><small className="form-note">Protected by JWT authentication and role-based access.</small></form></div>
+
+  async function sendOtp(event) {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    setMessage('')
+    try {
+      const { data } = await api.post('/api/auth/forgot-password/request', { recovery_email: recovery.recovery_email })
+      setRecovery(current => ({ ...current, challengeToken: data.challenge_token, maskedEmail: data.masked_recovery_email || '', otp: '' }))
+      setMessage(data.delivery_mode === 'mock' ? 'Development mock mode: code captured locally; no email was sent.' : data.message)
+      setScreen('verify')
+    } catch (err) {
+      setError('Could not request a verification code. Check the details and try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function verifyOtp(event) {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      const { data } = await api.post('/api/auth/forgot-password/verify', { challenge_token: recovery.challengeToken, otp: recovery.otp })
+      setRecovery(current => ({ ...current, resetToken: data.reset_token }))
+      setScreen('reset')
+    } catch (err) {
+      const detail = err.response?.data?.detail
+      setError(detail === 'Too many attempts. Please request a new code.' ? detail : 'Invalid or expired verification code.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function resetPassword(event) {
+    event.preventDefault()
+    const values = new FormData(event.currentTarget)
+    const newPassword = values.get('new_password')
+    const confirmPassword = values.get('confirm_password')
+    setError('')
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match.')
+      return
+    }
+    setBusy(true)
+    try {
+      const { data } = await api.post('/api/auth/forgot-password/reset', { reset_token: recovery.resetToken, new_password: newPassword })
+      setMessage(data.message)
+      setScreen('success')
+      setForm(current => ({ ...current, password: '' }))
+    } catch (err) {
+      setError(err.response?.data?.detail === 'Your password reset session has expired. Please start again.' ? err.response.data.detail : 'Could not reset your password. Please start again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <div className="login-page"><div className="login-visual"><div className="brand"><Logo /></div><div className="visual-copy"><span className="eyebrow cyan">ATTENDANCE / TIME / PLACE</span><h1>Presence, recorded.</h1><p>Check in and check out with a secure account, server time, and a one-time location capture.</p></div><div className="signal-grid"><span><b>01</b> SECURE LOGIN</span><span><b>02</b> SERVER TIME</span><span><b>03</b> LOCATION STORED</span></div></div>
+    {screen === 'login' && <form className="login-card" onSubmit={submitLogin}><span className="eyebrow">WELCOME BACK</span><h2>Sign in to your workspace</h2><p className="muted">Use your Aurelix credentials to continue.</p><label>Work email<input type="email" required value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} placeholder="you@aurelix.com" disabled={busy} /></label><label>Password<input type="password" required value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} placeholder="Password" disabled={busy} /></label>{error && <><div className="error-box"><X size={16}/>{error}</div><button className="login-link" type="button" onClick={() => { setError(''); setScreen('request') }}>Forgot password?</button></>}<button className="primary-button" type="submit" disabled={busy}>{busy ? 'Signing in...' : <>Enter workspace <ArrowRight size={17}/></>}</button><small className="form-note">Protected by JWT authentication and role-based access.</small></form>}
+    {screen === 'request' && <form className="login-card recovery-card" onSubmit={sendOtp}><span className="eyebrow">ACCOUNT RECOVERY</span><h2>Forgot Password</h2><label>Recovery Email<input type="email" required autoComplete="email" value={recovery.recovery_email} onChange={event => setRecovery({ ...recovery, recovery_email: event.target.value })} disabled={busy}/></label>{error && <div className="error-box"><X size={16}/>{error}</div>}<button className="primary-button" type="submit" disabled={busy}>{busy ? 'Sending...' : 'Send OTP'}</button><button className="login-link" type="button" onClick={backToLogin} disabled={busy}>Back to Login</button></form>}
+    {screen === 'verify' && <form className="login-card recovery-card" onSubmit={verifyOtp}><span className="eyebrow">ACCOUNT RECOVERY</span><h2>OTP Verification</h2><p className="muted">Verification code sent to</p><p className="recovery-destination">{recovery.maskedEmail}</p>{message && <div className="success-box"><Check size={16}/>{message}</div>}<label>OTP<input type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={recovery.otp} onChange={event => setRecovery({ ...recovery, otp: event.target.value.replace(/\D/g, '').slice(0, 6) })} disabled={busy}/></label>{error && <div className="error-box"><X size={16}/>{error}</div>}<button className="primary-button" type="submit" disabled={busy || recovery.otp.length !== 6}>{busy ? 'Verifying...' : 'Verify OTP'}</button><button className="login-link" type="button" onClick={sendOtp} disabled={busy}>Resend OTP</button><button className="login-link" type="button" onClick={backToLogin} disabled={busy}>Back to Login</button></form>}
+    {screen === 'reset' && <form className="login-card recovery-card" onSubmit={resetPassword}><span className="eyebrow">ACCOUNT RECOVERY</span><h2>Create New Password</h2><label>New Password<input type="password" name="new_password" minLength={8} maxLength={128} autoComplete="new-password" required disabled={busy}/></label><label>Confirm New Password<input type="password" name="confirm_password" minLength={8} maxLength={128} autoComplete="new-password" required disabled={busy}/></label>{error && <div className="error-box"><X size={16}/>{error}</div>}<button className="primary-button" type="submit" disabled={busy}>{busy ? 'Resetting...' : 'Reset Password'}</button><button className="login-link" type="button" onClick={backToLogin} disabled={busy}>Back to Login</button></form>}
+    {screen === 'success' && <section className="login-card recovery-card"><span className="eyebrow">ACCOUNT RECOVERY</span><h2>Password reset complete</h2><div className="success-box"><Check size={16}/>{message}</div><button className="primary-button" type="button" onClick={backToLogin}>Back to Login</button></section>}
+  </div>
 }
 
 function AdminPhotoModal({ viewer, onClose }) {
@@ -151,6 +220,8 @@ function ExportDialog({ selectedDate, onClose, onExport, isExporting, exportErro
   const currentYear = Number(selectedDate.slice(0, 4))
   const [range, setRange] = useState('day')
   const [date, setDate] = useState(selectedDate)
+  const [startDate, setStartDate] = useState(selectedDate)
+  const [endDate, setEndDate] = useState(selectedDate)
   const [month, setMonth] = useState(selectedDate.slice(0, 7))
   const [startMonth, setStartMonth] = useState(selectedDate.slice(0, 7))
   const [endMonth, setEndMonth] = useState(selectedDate.slice(0, 7))
@@ -165,14 +236,19 @@ function ExportDialog({ selectedDate, onClose, onExport, isExporting, exportErro
       setValidationError('Start month must not be after end month.')
       return
     }
-    onExport({ range, date, month, startMonth, endMonth, year })
+    if (range === 'custom' && startDate > endDate) {
+      setValidationError('From Date must not be after To Date.')
+      return
+    }
+    onExport({ range, date, month, startMonth, endMonth, startDate, endDate, year })
   }
 
   return <div className="photo-capture-overlay export-dialog-overlay" role="dialog" aria-modal="true" aria-labelledby="export-dialog-title" onClick={event => { if (!isExporting && event.target === event.currentTarget) onClose() }}>
     <form className="photo-capture-card export-dialog" onSubmit={submit}>
       <div className="export-dialog-heading"><div><span className="eyebrow cyan">ATTENDANCE EXPORT</span><h3 id="export-dialog-title">Export attendance data</h3></div><button className="icon-button" type="button" title="Close export dialog" onClick={onClose} disabled={isExporting}><X size={16}/></button></div>
-      <label className="export-field">Export period<select value={range} onChange={event => { setRange(event.target.value); setValidationError('') }} disabled={isExporting}><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option><option value="months">Multiple Months</option><option value="year">Year</option></select></label>
-      {(range === 'day' || range === 'week') && <label className="export-field">{range === 'day' ? 'Date' : 'A date in the week'}<input type="date" value={date} onChange={event => setDate(event.target.value)} disabled={isExporting} required /></label>}
+      <label className="export-field">Export period<select value={range} onChange={event => { setRange(event.target.value); setValidationError('') }} disabled={isExporting}><option value="day">Day</option><option value="custom">Custom Date Range</option><option value="month">Month</option><option value="months">Multiple Months</option><option value="year">Year</option></select></label>
+      {range === 'day' && <label className="export-field">Date<input type="date" value={date} onChange={event => setDate(event.target.value)} disabled={isExporting} required /></label>}
+      {range === 'custom' && <div className="export-month-fields"><label className="export-field">From Date<input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} disabled={isExporting} required /></label><label className="export-field">To Date<input type="date" value={endDate} onChange={event => setEndDate(event.target.value)} disabled={isExporting} required /></label></div>}
       {range === 'month' && <label className="export-field">Month<input type="month" value={month} onChange={event => setMonth(event.target.value)} disabled={isExporting} required /></label>}
       {range === 'months' && <div className="export-month-fields"><label className="export-field">Start month<input type="month" value={startMonth} onChange={event => setStartMonth(event.target.value)} disabled={isExporting} required /></label><label className="export-field">End month<input type="month" value={endMonth} onChange={event => setEndMonth(event.target.value)} disabled={isExporting} required /></label></div>}
       {range === 'year' && <label className="export-field">Year<select value={year} onChange={event => setYear(event.target.value)} disabled={isExporting}>{years.map(value => <option value={value} key={value}>{value}</option>)}</select></label>}
@@ -253,22 +329,45 @@ function AdminDashboard() {
   return <><section className="hero-strip compact"><div><span className="eyebrow cyan">LIVE OPERATIONS / OVERVIEW</span><h2>Attendance register</h2><p>Review employee attendance by day and export the stored check-in/check-out records.</p></div><label className="date-picker">Selected day<input type="date" value={selectedDate} onChange={event => chooseDate(event.target.value)} /></label></section><div className="stats-grid">{[['TOTAL EMPLOYEES', stats.total_employees, Users], ['PRESENT', stats.present_today, Check], ['ABSENT', stats.absent_today, X]].map(([label, value, Icon]) => <div className="stat-card" key={label}><Icon size={17}/><span>{label}</span><strong>{value ?? '-'}</strong></div>)}</div><div className="admin-dashboard-grid"><section className="panel calendar-panel"><div className="panel-heading"><div><span className="eyebrow">ATTENDANCE CALENDAR</span><h3>{new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h3></div><div className="calendar-actions"><button className="icon-button" title="Previous month" onClick={() => shiftMonth(-1)}><ArrowLeft size={16}/></button><button className="icon-button" title="Next month" onClick={() => shiftMonth(1)}><ArrowRight size={16}/></button></div></div><div className="calendar-weekdays">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => <span key={day}>{day}</span>)}</div><div className="calendar-grid">{renderCalendar()}</div></section><section className="panel table-panel"><div className="panel-heading"><div><span className="eyebrow">ATTENDANCE LOG / {selectedDate}</span><h3>Daily Attendance Register</h3></div><button className="ghost-button" type="button" onClick={() => { setExportError(''); setExportDialogOpen(true) }}><Download size={16}/>Export data</button></div><div className="table-scroll"><table><thead><tr><th>Employee</th><th>Department</th><th>In</th><th>In location</th><th>Check-in Photo</th><th>Out</th><th>Out location</th><th>Check-out Photo</th><th>Status</th><th>Action</th></tr></thead><tbody>{records.map(item => <tr key={item.attendance_id}><td><b>{item.employee?.full_name || item.user_name || item.employee_id}</b><small>{item.employee_id}</small></td><td>{item.employee?.department || '-'}</td><td>{item.check_in_time ? `${formatKolkataTime(item.check_in_time)} IST` : '-'}</td><td>{formatLocation(item.check_in_location)}</td><td>{photoCell(item, 'check_in')}</td><td>{item.check_out_time ? `${formatKolkataTime(item.check_out_time)} IST` : 'Open'}</td><td>{formatLocation(item.check_out_location)}</td><td>{photoCell(item, 'check_out')}</td><td><span className={item.final_status === 'PRESENT' ? 'badge verified' : 'badge absent'}>{item.final_status}</span></td><td><button className="ghost-button table-action" onClick={() => clearRecord(item.attendance_id)} disabled={item.attendance_id.startsWith('absent-')}>Undo record</button></td></tr>)}</tbody></table>{!records.length && <div className="empty-state">No active employees found.</div>}</div></section></div>{exportDialogOpen && <ExportDialog selectedDate={selectedDate} onClose={() => setExportDialogOpen(false)} onExport={exportData} isExporting={isExporting} exportError={exportError} />}{photoViewer && <AdminPhotoModal viewer={photoViewer} onClose={() => setPhotoViewer(null)} />}</>
 }
 
+function RecoveryEmailVerificationPanel({ challenge, onVerified }) {
+  const [otp, setOtp] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  async function submit(event) {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      const { data } = await api.post('/api/auth/recovery-email/verify', { challenge_token: challenge.token, otp })
+      onVerified(data.message)
+    } catch (err) {
+      const detail = err.response?.data?.detail
+      setError(detail === 'Too many attempts. Please request a new code.' ? detail : 'Invalid or expired verification code.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <form className="recovery-verification" onSubmit={submit}><p className="muted">Verification code sent to <b>{challenge.maskedEmail}</b></p><label>Recovery Email OTP<input type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={otp} onChange={event => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} disabled={busy}/></label>{error && <div className="error-box"><X size={16}/>{error}</div>}<button className="primary-button" type="submit" disabled={busy || otp.length !== 6}>{busy ? 'Verifying...' : 'Verify Recovery Email'}</button></form>
+}
+
 function CreateEmployeePanel({ onCreated }) {
-  const [form, setForm] = useState({ employee_id: '', full_name: '', email: '', department: '', role: 'employee', password: '' })
+  const [form, setForm] = useState({ employee_id: '', full_name: '', email: '', recovery_email: '', department: '', role: 'employee', password: '' })
   const [message, setMessage] = useState('')
+  const [verification, setVerification] = useState(null)
   async function submit(event) {
     event.preventDefault()
     try {
-      await api.post('/api/employees', form)
-      setMessage('Employee created successfully.')
-      setForm({ employee_id: '', full_name: '', email: '', department: '', role: 'employee', password: '' })
+      const { data } = await api.post('/api/employees', form)
+      setMessage(data.verification_delivery_mode === 'mock' ? 'Development mock mode: code captured locally; no email was sent.' : data.verification_message || 'Employee created. Verify the recovery email to enable password recovery.')
+      setVerification(data.verification_challenge_token ? { token: data.verification_challenge_token, maskedEmail: data.recovery_email.replace(/^(.).*(@.*)$/, '$1******$2') } : null)
+      setForm({ employee_id: '', full_name: '', email: '', recovery_email: '', department: '', role: 'employee', password: '' })
       onCreated()
     } catch (error) {
       const detail = error.response?.data?.detail
       setMessage(Array.isArray(detail) ? detail.map(item => item.msg).join(' ') : detail || 'Could not create employee.')
     }
   }
-  return <section className="panel form-panel"><span className="eyebrow">PEOPLE / NEW RECORD</span><h2>Add employee</h2><form className="employee-form" onSubmit={submit}>{[['employee_id','Employee ID'],['full_name','Full name'],['email','Work email'],['department','Department'],['password','Temporary password']].map(([key, label]) => <label key={key}>{label}<input required={key !== 'password'} type={key === 'email' ? 'email' : key === 'password' ? 'password' : 'text'} value={form[key]} onChange={event => setForm({ ...form, [key]: event.target.value })}/></label>)}<button className="primary-button" type="submit"><UserPlus size={17}/> Add employee</button></form>{message && <div className={message.startsWith('Employee created') ? 'success-box' : 'error-box'}><Check size={17}/>{message}</div>}</section>
+  return <section className="panel form-panel"><span className="eyebrow">PEOPLE / NEW RECORD</span><h2>Add employee</h2><form className="employee-form" onSubmit={submit}>{[['employee_id','Employee ID'],['full_name','Full name'],['email','Login Email'],['recovery_email','Recovery Email'],['department','Department'],['password','Temporary password']].map(([key, label]) => <label key={key}>{label}<input required={key !== 'password'} type={key === 'email' || key === 'recovery_email' ? 'email' : key === 'password' ? 'password' : 'text'} autoComplete={key === 'recovery_email' ? 'email' : undefined} value={form[key]} onChange={event => setForm({ ...form, [key]: event.target.value })}/></label>)}<button className="primary-button" type="submit"><UserPlus size={17}/> Add employee</button></form>{message && <div className="success-box"><Check size={17}/>{message}</div>}{verification && <RecoveryEmailVerificationPanel challenge={verification} onVerified={verificationMessage => { setVerification(null); setMessage(verificationMessage); onCreated() }}/>}</section>
 }
 
 function EmployeeEditor({ user }) {
@@ -276,6 +375,7 @@ function EmployeeEditor({ user }) {
   const [selectedId, setSelectedId] = useState('')
   const [form, setForm] = useState(null)
   const [message, setMessage] = useState('')
+  const [verification, setVerification] = useState(null)
   async function load() {
     const { data } = await api.get('/api/employees')
     setEmployees(data)
@@ -294,9 +394,11 @@ function EmployeeEditor({ user }) {
   async function save(event) {
     event.preventDefault()
     try {
-      const { data: updatedEmployee } = await api.put(`/api/employees/${selectedId}`, { employee_id: form.employee_id, full_name: form.full_name, email: form.email, department: form.department, role: form.role, password: form.password || null })
+      const { data: updatedEmployee } = await api.put(`/api/employees/${selectedId}`, { employee_id: form.employee_id, full_name: form.full_name, email: form.email, recovery_email: form.recovery_email || null, department: form.department, role: form.role, password: form.password || null })
       setSelectedId(updatedEmployee.employee_id)
-      setMessage('Employee details saved successfully.')
+      setForm({ ...updatedEmployee, password: '' })
+      setVerification(updatedEmployee.verification_challenge_token ? { token: updatedEmployee.verification_challenge_token, maskedEmail: updatedEmployee.recovery_email.replace(/^(.).*(@.*)$/, '$1******$2') } : null)
+      setMessage(updatedEmployee.verification_delivery_mode === 'mock' ? 'Development mock mode: code captured locally; no email was sent.' : updatedEmployee.verification_message || 'Employee details saved successfully.')
       await load()
     } catch (error) {
       const detail = error.response?.data?.detail
@@ -316,7 +418,7 @@ function EmployeeEditor({ user }) {
     }
   }
   const isCurrentUser = Boolean(form && (form.id === user?.id || form.employee_id === user?.employee_id))
-  return <div className="admin-people-grid"><CreateEmployeePanel onCreated={load}/><section className="panel"><span className="eyebrow">PEOPLE / DIRECTORY</span><h2>Members and admins</h2><div className="people-list">{employees.map(item => <button type="button" className={item.employee_id === selectedId ? 'person-row selected-person' : 'person-row'} onClick={() => selectEmployee(item.employee_id)} key={item.employee_id}><span><b>{item.full_name}</b><small>{item.employee_id} - {item.department} - {item.role}</small></span><span className="muted">Edit</span></button>)}</div></section><section className="panel">{form ? <><span className="eyebrow">PEOPLE / EDIT RECORD</span><h2>Edit employee details</h2><form className="employee-form" onSubmit={save}>{[['employee_id','Employee ID'],['full_name','Full name'],['email','Work email'],['department','Department'],['password','New password']].map(([key, label]) => <label key={key}>{label}<input type={key === 'email' ? 'email' : key === 'password' ? 'password' : 'text'} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })}/></label>)}<button className="primary-button" type="submit">Save changes</button>{!isCurrentUser && <button className="ghost-button" type="button" onClick={remove}><Trash2 size={16}/> Remove employee</button>}</form>{message && <div className="success-box"><Check size={17}/>{message}</div>}</> : <><span className="eyebrow">PEOPLE / EDIT RECORD</span><h2>Select a person</h2><p className="muted">Choose a person from the directory to edit their details.</p></>}</section></div>
+  return <div className="admin-people-grid"><CreateEmployeePanel onCreated={load}/><section className="panel"><span className="eyebrow">PEOPLE / DIRECTORY</span><h2>Members and admins</h2><div className="people-list">{employees.map(item => <button type="button" className={item.employee_id === selectedId ? 'person-row selected-person' : 'person-row'} onClick={() => selectEmployee(item.employee_id)} key={item.employee_id}><span><b>{item.full_name}</b><small>{item.employee_id} - {item.department} - {item.role}</small></span><span className="muted">Edit</span></button>)}</div></section><section className="panel">{form ? <><span className="eyebrow">PEOPLE / EDIT RECORD</span><h2>Edit employee details</h2><form className="employee-form" onSubmit={save}>{[['employee_id','Employee ID'],['full_name','Full name'],['email','Login Email'],['department','Department'],['password','New password']].map(([key, label]) => <label key={key}>{label}<input type={key === 'email' ? 'email' : key === 'password' ? 'password' : 'text'} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })}/></label>)}<label>Recovery Email<input type="email" autoComplete="email" value={form.recovery_email || ''} onChange={event => setForm({ ...form, recovery_email: event.target.value })}/>{form.recovery_email && <small>{form.recovery_email_verified ? 'Verified' : 'Not verified'}</small>}</label><button className="primary-button" type="submit">Save changes</button>{!isCurrentUser && <button className="ghost-button" type="button" onClick={remove}><Trash2 size={16}/> Remove employee</button>}</form>{message && <div className="success-box"><Check size={17}/>{message}</div>}{verification && <RecoveryEmailVerificationPanel challenge={verification} onVerified={verificationMessage => { setVerification(null); setForm(current => ({ ...current, recovery_email_verified: true })); setMessage(verificationMessage); load() }}/>}</> : <><span className="eyebrow">PEOPLE / EDIT RECORD</span><h2>Select a person</h2><p className="muted">Choose a person from the directory to edit their details.</p></>}</section></div>
 }
 
 function History() {

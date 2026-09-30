@@ -21,6 +21,8 @@ def init_indexes() -> None:
     db = get_db()
     db.employees.create_index("employee_id", unique=True)
     db.employees.create_index("email", unique=True)
+    db.employees.create_index("recovery_email", unique=True, partialFilterExpression={"is_active": True, "recovery_email_verified": True, "recovery_email": {"$type": "string"}})
+    db.password_reset_sessions.create_index("cleanup_at", expireAfterSeconds=0)
     db.attendance.create_index([("employee_id", ASCENDING), ("date", DESCENDING)])
     db.attendance.create_index([("employee_id", ASCENDING), ("date", ASCENDING)], unique=True)
     db.audit_logs.create_index([("created_at", DESCENDING)])

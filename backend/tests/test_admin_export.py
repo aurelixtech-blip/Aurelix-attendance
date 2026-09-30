@@ -83,7 +83,10 @@ def read_sheet(response):
     ("params", "expected_bounds", "expected_dates", "expected_filename"),
     [
         ({"range": "day", "date": "2026-09-23"}, ("2026-09-23", "2026-09-23"), ["2026-09-23"], "aurelix-attendance-day-2026-09-23.xlsx"),
-        ({"range": "week", "date": "2026-09-23"}, ("2026-09-21", "2026-09-27"), ["2026-09-22", "2026-09-23"], "aurelix-attendance-week-2026-09-21-to-2026-09-27.xlsx"),
+        ({"range": "custom", "start_date": "2026-09-22", "end_date": "2026-09-22"}, ("2026-09-22", "2026-09-22"), ["2026-09-22"], "aurelix-attendance-custom-2026-09-22-to-2026-09-22.xlsx"),
+        ({"range": "custom", "start_date": "2026-09-20", "end_date": "2026-09-25"}, ("2026-09-20", "2026-09-25"), ["2026-09-22", "2026-09-23"], "aurelix-attendance-custom-2026-09-20-to-2026-09-25.xlsx"),
+        ({"range": "custom", "start_date": "2026-09-28", "end_date": "2026-10-05"}, ("2026-09-28", "2026-10-05"), ["2026-10-01"], "aurelix-attendance-custom-2026-09-28-to-2026-10-05.xlsx"),
+        ({"range": "custom", "start_date": "2026-12-20", "end_date": "2027-01-10"}, ("2026-12-20", "2027-01-10"), [], "aurelix-attendance-custom-2026-12-20-to-2027-01-10.xlsx"),
         ({"range": "month", "date": "2026-09-23"}, ("2026-09-01", "2026-09-30"), ["2026-09-01", "2026-09-22", "2026-09-23"], "aurelix-attendance-month-2026-09.xlsx"),
         ({"range": "months", "start_date": "2026-01-01", "end_date": "2026-03-01"}, ("2026-01-01", "2026-03-31"), ["2026-01-15", "2026-03-31"], "aurelix-attendance-months-2026-01-to-2026-03.xlsx"),
         ({"range": "year", "date": "2026-09-23"}, ("2026-01-01", "2026-12-31"), ["2026-01-15", "2026-03-31", "2026-09-01", "2026-09-22", "2026-09-23", "2026-10-01"], "aurelix-attendance-year-2026.xlsx"),
@@ -139,19 +142,41 @@ def test_two_export_periods_produce_different_workbook_contents(monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_week_export_includes_all_seven_dates_across_month_boundary(monkeypatch):
-    client, attendance = export_client(monkeypatch, [record("2026-09-29", "EMP-1")])
+def test_custom_export_includes_exact_dates_across_month_and_year_boundaries(monkeypatch):
+    client, attendance = export_client(monkeypatch, [record("2026-09-29", "EMP-1"), record("2027-01-01", "EMP-1")])
     try:
-        response = client.get("/api/admin/export", params={"range": "week", "date": "2026-09-29"})
+        response = client.get("/api/admin/export", params={"range": "custom", "start_date": "2026-12-20", "end_date": "2027-01-10"})
         sheet = read_sheet(response)
         rows = list(sheet.iter_rows(min_row=2, values_only=True))
-        dates = {f"2026-09-{day:02d}" for day in range(28, 31)} | {f"2026-10-{day:02d}" for day in range(1, 5)}
+        dates = {(date(2026, 12, 20) + timedelta(days=offset)).isoformat() for offset in range(22)}
 
-        assert attendance.filters[-1] == {"date": {"$gte": "2026-09-28", "$lte": "2026-10-04"}}
-        assert len(rows) == 14
+        assert attendance.filters[-1] == {"date": {"$gte": "2026-12-20", "$lte": "2027-01-10"}}
+        assert len(rows) == 44
         assert {(row[0], row[1]) for row in rows} == {(day, employee_id) for day in dates for employee_id in ("EMP-1", "EMP-2")}
-        assert all(row[12] == ("PRESENT" if row[0] == "2026-09-29" and row[1] == "EMP-1" else "ABSENT") for row in rows)
-        assert len(attendance.records) == 1
+        assert all(row[12] == ("PRESENT" if row[0] == "2027-01-01" and row[1] == "EMP-1" else "ABSENT") for row in rows)
+        assert len(attendance.records) == 2
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_custom_export_rejects_start_date_after_end_date(monkeypatch):
+    client, attendance = export_client(monkeypatch, [])
+    try:
+        response = client.get("/api/admin/export", params={"range": "custom", "start_date": "2026-10-05", "end_date": "2026-09-28"})
+        assert response.status_code == 422
+        assert response.json()["detail"] == "Start date must not be after end date"
+        assert not attendance.filters
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_custom_export_requires_both_dates(monkeypatch):
+    client, attendance = export_client(monkeypatch, [])
+    try:
+        response = client.get("/api/admin/export", params={"range": "custom", "start_date": "2026-09-22"})
+        assert response.status_code == 422
+        assert response.json()["detail"] == "Start and end dates are required for a custom date range"
+        assert not attendance.filters
     finally:
         app.dependency_overrides.clear()
 
@@ -287,3 +312,4 @@ def test_expired_or_missing_photos_do_not_fail_export(monkeypatch):
 
 def test_resolve_export_date_range_normalizes_month_boundaries():
     assert admin_api.resolve_export_date_range("months", None, date(2026, 1, 22), date(2026, 3, 4)) == (date(2026, 1, 1), date(2026, 3, 31))
+    assert admin_api.resolve_export_date_range("custom", None, date(2026, 12, 20), date(2027, 1, 10)) == (date(2026, 12, 20), date(2027, 1, 10))
