@@ -8,7 +8,7 @@ class EmployeeCreate(BaseModel):
     full_name: str = Field(min_length=2, max_length=120)
     email: EmailStr
     department: str = Field(min_length=2, max_length=80)
-    role: Literal["employee", "admin"] = "employee"
+    role: Literal["employee", "admin"]
     password: str
     recovery_email: EmailStr
 
@@ -24,7 +24,7 @@ class EmployeeUpdate(BaseModel):
     full_name: str = Field(min_length=2, max_length=120)
     email: EmailStr
     department: str = Field(min_length=2, max_length=80)
-    role: Literal["employee", "admin"] = "employee"
+    role: Literal["employee", "admin"]
     password: str | None = None
     recovery_email: EmailStr | None = None
 

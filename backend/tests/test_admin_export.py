@@ -79,17 +79,21 @@ def read_sheet(response):
     return load_workbook(BytesIO(response.content)).active
 
 
+def exported_iso_date(value):
+    return value.date().isoformat() if isinstance(value, datetime) else value.isoformat() if isinstance(value, date) else value
+
+
 @pytest.mark.parametrize(
     ("params", "expected_bounds", "expected_dates", "expected_filename"),
     [
-        ({"range": "day", "date": "2026-09-23"}, ("2026-09-23", "2026-09-23"), ["2026-09-23"], "aurelix-attendance-day-2026-09-23.xlsx"),
-        ({"range": "custom", "start_date": "2026-09-22", "end_date": "2026-09-22"}, ("2026-09-22", "2026-09-22"), ["2026-09-22"], "aurelix-attendance-custom-2026-09-22-to-2026-09-22.xlsx"),
-        ({"range": "custom", "start_date": "2026-09-20", "end_date": "2026-09-25"}, ("2026-09-20", "2026-09-25"), ["2026-09-22", "2026-09-23"], "aurelix-attendance-custom-2026-09-20-to-2026-09-25.xlsx"),
-        ({"range": "custom", "start_date": "2026-09-28", "end_date": "2026-10-05"}, ("2026-09-28", "2026-10-05"), ["2026-10-01"], "aurelix-attendance-custom-2026-09-28-to-2026-10-05.xlsx"),
-        ({"range": "custom", "start_date": "2026-12-20", "end_date": "2027-01-10"}, ("2026-12-20", "2027-01-10"), [], "aurelix-attendance-custom-2026-12-20-to-2027-01-10.xlsx"),
-        ({"range": "month", "date": "2026-09-23"}, ("2026-09-01", "2026-09-30"), ["2026-09-01", "2026-09-22", "2026-09-23"], "aurelix-attendance-month-2026-09.xlsx"),
-        ({"range": "months", "start_date": "2026-01-01", "end_date": "2026-03-01"}, ("2026-01-01", "2026-03-31"), ["2026-01-15", "2026-03-31"], "aurelix-attendance-months-2026-01-to-2026-03.xlsx"),
-        ({"range": "year", "date": "2026-09-23"}, ("2026-01-01", "2026-12-31"), ["2026-01-15", "2026-03-31", "2026-09-01", "2026-09-22", "2026-09-23", "2026-10-01"], "aurelix-attendance-year-2026.xlsx"),
+        ({"range": "day", "date": "2026-09-23"}, ("2026-09-23", "2026-09-23"), ["2026-09-23"], "aurelix-attendance-day-23-09-2026.xlsx"),
+        ({"range": "custom", "start_date": "2026-09-22", "end_date": "2026-09-22"}, ("2026-09-22", "2026-09-22"), ["2026-09-22"], "aurelix-attendance-custom-22-09-2026-to-22-09-2026.xlsx"),
+        ({"range": "custom", "start_date": "2026-09-20", "end_date": "2026-09-25"}, ("2026-09-20", "2026-09-25"), ["2026-09-22", "2026-09-23"], "aurelix-attendance-custom-20-09-2026-to-25-09-2026.xlsx"),
+        ({"range": "custom", "start_date": "2026-09-28", "end_date": "2026-10-05"}, ("2026-09-28", "2026-10-05"), ["2026-10-01"], "aurelix-attendance-custom-28-09-2026-to-05-10-2026.xlsx"),
+        ({"range": "custom", "start_date": "2026-12-20", "end_date": "2027-01-10"}, ("2026-12-20", "2027-01-10"), [], "aurelix-attendance-custom-20-12-2026-to-10-01-2027.xlsx"),
+        ({"range": "month", "date": "2026-09-23"}, ("2026-09-01", "2026-09-30"), ["2026-09-01", "2026-09-22", "2026-09-23"], "aurelix-attendance-month-01-09-2026-to-30-09-2026.xlsx"),
+        ({"range": "months", "start_date": "2026-01-01", "end_date": "2026-03-01"}, ("2026-01-01", "2026-03-31"), ["2026-01-15", "2026-03-31"], "aurelix-attendance-months-01-01-2026-to-31-03-2026.xlsx"),
+        ({"range": "year", "date": "2026-09-23"}, ("2026-01-01", "2026-12-31"), ["2026-01-15", "2026-03-31", "2026-09-01", "2026-09-22", "2026-09-23", "2026-10-01"], "aurelix-attendance-year-01-01-2026-to-31-12-2026.xlsx"),
     ],
 )
 def test_export_uses_computed_date_range_and_returns_only_matching_rows(monkeypatch, params, expected_bounds, expected_dates, expected_filename):
@@ -98,26 +102,50 @@ def test_export_uses_computed_date_range_and_returns_only_matching_rows(monkeypa
     try:
         response = client.get("/api/admin/export", params=params)
         sheet = read_sheet(response)
+        assert sheet["A2"].number_format == "dd-mm-yyyy"
         assert attendance.filters[-1] == {"date": {"$gte": expected_bounds[0], "$lte": expected_bounds[1]}}
         rows = list(sheet.iter_rows(min_row=2, values_only=True))
-        actual_dates = [row[0] for row in rows if row[1] == "EMP-1" and row[12] != "ABSENT"]
+        assert all(row[1] == date.fromisoformat(exported_iso_date(row[0])).strftime("%A") for row in rows)
+        actual_dates = [exported_iso_date(row[0]) for row in rows if row[2] == "EMP-1" and row[13] != "ABSENT"]
         assert set(actual_dates) == set(expected_dates)
         assert actual_dates == sorted(actual_dates, reverse=True)
         expected_range_dates = [
             (date.fromisoformat(expected_bounds[0]) + timedelta(days=offset)).isoformat()
             for offset in range((date.fromisoformat(expected_bounds[1]) - date.fromisoformat(expected_bounds[0])).days + 1)
         ]
-        absent_rows = [row for row in rows if row[1] == "EMP-2"]
-        assert [row[0] for row in absent_rows] == sorted(expected_range_dates, reverse=True)
-        assert all(row[12] == "ABSENT" for row in absent_rows)
+        absent_rows = [row for row in rows if row[2] == "EMP-2"]
+        assert [exported_iso_date(row[0]) for row in absent_rows] == sorted(expected_range_dates, reverse=True)
+        assert all(row[13] == "ABSENT" for row in absent_rows)
         for employee_id in ("EMP-1", "EMP-2"):
-            employee_rows = [row for row in rows if row[1] == employee_id]
-            assert [row[0] for row in employee_rows] == sorted(expected_range_dates, reverse=True)
+            employee_rows = [row for row in rows if row[2] == employee_id]
+            assert [exported_iso_date(row[0]) for row in employee_rows] == sorted(expected_range_dates, reverse=True)
         assert len(rows) == len(expected_range_dates) * 2
         assert len(attendance.records) == 7
         assert response.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         assert response.headers["content-disposition"].startswith("attachment; filename=")
         assert expected_filename in response.headers["content-disposition"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize(
+    ("attendance_date", "expected_day"),
+    [
+        ("2026-09-30", "Wednesday"),
+        ("2026-10-01", "Thursday"),
+        ("2026-12-31", "Thursday"),
+        ("2027-01-01", "Friday"),
+        ("2024-02-29", "Thursday"),
+    ],
+)
+def test_export_day_column_uses_actual_calendar_weekday(monkeypatch, attendance_date, expected_day):
+    client, _attendance = export_client(monkeypatch, [record(attendance_date)])
+    try:
+        sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": attendance_date}))
+
+        assert exported_iso_date(sheet["A2"].value) == attendance_date
+        assert sheet["A2"].number_format == "dd-mm-yyyy"
+        assert sheet["B2"].value == expected_day
     finally:
         app.dependency_overrides.clear()
 
@@ -128,16 +156,16 @@ def test_two_export_periods_produce_different_workbook_contents(monkeypatch):
         day_sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-22"}))
         month_sheet = read_sheet(client.get("/api/admin/export", params={"range": "month", "date": "2026-10-01"}))
         day_rows = list(day_sheet.iter_rows(min_row=2, values_only=True))
-        assert [(row[0], row[1], row[12]) for row in day_rows] == [
+        assert [(exported_iso_date(row[0]), row[2], row[13]) for row in day_rows] == [
             ("2026-09-22", "EMP-1", "PRESENT"),
             ("2026-09-22", "EMP-2", "ABSENT"),
         ]
         month_rows = list(month_sheet.iter_rows(min_row=2, values_only=True))
         assert len(month_rows) == 62
-        assert [row[0] for row in month_rows if row[1] == "EMP-1"] == [f"2026-10-{day:02d}" for day in range(31, 0, -1)]
-        assert all(row[12] == "ABSENT" for row in month_rows if row[1] == "EMP-1")
-        assert sum(row[12] == "PRESENT" and row[0] == "2026-10-01" for row in month_rows if row[1] == "EMP-2") == 1
-        assert sum(row[12] == "ABSENT" for row in month_rows if row[1] == "EMP-2") == 30
+        assert [exported_iso_date(row[0]) for row in month_rows if row[2] == "EMP-1"] == [f"2026-10-{day:02d}" for day in range(31, 0, -1)]
+        assert all(row[13] == "ABSENT" for row in month_rows if row[2] == "EMP-1")
+        assert sum(row[13] == "PRESENT" and exported_iso_date(row[0]) == "2026-10-01" for row in month_rows if row[2] == "EMP-2") == 1
+        assert sum(row[13] == "ABSENT" for row in month_rows if row[2] == "EMP-2") == 30
     finally:
         app.dependency_overrides.clear()
 
@@ -152,8 +180,8 @@ def test_custom_export_includes_exact_dates_across_month_and_year_boundaries(mon
 
         assert attendance.filters[-1] == {"date": {"$gte": "2026-12-20", "$lte": "2027-01-10"}}
         assert len(rows) == 44
-        assert {(row[0], row[1]) for row in rows} == {(day, employee_id) for day in dates for employee_id in ("EMP-1", "EMP-2")}
-        assert all(row[12] == ("PRESENT" if row[0] == "2027-01-01" and row[1] == "EMP-1" else "ABSENT") for row in rows)
+        assert {(exported_iso_date(row[0]), row[2]) for row in rows} == {(day, employee_id) for day in dates for employee_id in ("EMP-1", "EMP-2")}
+        assert all(row[13] == ("PRESENT" if exported_iso_date(row[0]) == "2027-01-01" and row[2] == "EMP-1" else "ABSENT") for row in rows)
         assert len(attendance.records) == 2
     finally:
         app.dependency_overrides.clear()
@@ -194,13 +222,13 @@ def test_export_keeps_existing_inactive_and_missing_employee_records(monkeypatch
     client, _attendance = export_client(monkeypatch, records, employee_records)
     try:
         sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
-        rows = {row[1]: row for row in sheet.iter_rows(min_row=2, values_only=True)}
+        rows = {row[2]: row for row in sheet.iter_rows(min_row=2, values_only=True)}
 
-        assert rows["EMP-INACTIVE"][2] == "Inactive Employee"
-        assert rows["EMP-INACTIVE"][12] == "PRESENT"
-        assert rows["EMP-MISSING"][2] == "Former Person"
-        assert rows["EMP-MISSING"][12] == "PRESENT"
-        assert rows["EMP-1"][12] == rows["EMP-2"][12] == "ABSENT"
+        assert rows["EMP-INACTIVE"][3] == "Inactive Employee"
+        assert rows["EMP-INACTIVE"][13] == "PRESENT"
+        assert rows["EMP-MISSING"][3] == "Former Person"
+        assert rows["EMP-MISSING"][13] == "PRESENT"
+        assert rows["EMP-1"][13] == rows["EMP-2"][13] == "ABSENT"
     finally:
         app.dependency_overrides.clear()
 
@@ -220,8 +248,8 @@ def test_empty_export_has_headers_and_no_data_rows(monkeypatch):
     try:
         sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
         assert sheet.max_row == 3
-        assert [cell.value for cell in sheet[1]] == ["Date", "Employee ID", "Employee", "Email", "Department", "Check In", "Check In Location", "Check-in Photo", "Check Out", "Working Hours", "Check Out Location", "Check-out Photo", "Status"]
-        assert [sheet[f"M{row}"].value for row in (2, 3)] == ["ABSENT", "ABSENT"]
+        assert [cell.value for cell in sheet[1]] == ["Date", "Day", "Employee ID", "Employee", "Email", "Department", "Check In", "Check In Location", "Check-in Photo", "Check Out", "Working Hours", "Check Out Location", "Check-out Photo", "Status"]
+        assert [sheet[f"N{row}"].value for row in (2, 3)] == ["ABSENT", "ABSENT"]
     finally:
         app.dependency_overrides.clear()
 
@@ -234,8 +262,8 @@ def test_export_formats_utc_timestamps_as_kolkata_ist_strings(monkeypatch):
     )])
     try:
         sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-29"}))
-        assert sheet["F2"].value == "02:17:33 pm IST"
-        assert sheet["I2"].value == "02:45:10 pm IST"
+        assert sheet["G2"].value == "02:17:33 pm IST"
+        assert sheet["J2"].value == "02:45:10 pm IST"
     finally:
         app.dependency_overrides.clear()
 
@@ -250,13 +278,13 @@ def test_export_writes_working_hours_as_excel_duration_and_marks_open_records(mo
     try:
         sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
 
-        assert sheet["J2"].value == timedelta(hours=8, minutes=40, seconds=27)
-        assert sheet["J2"].number_format == "[h]:mm:ss"
-        assert sheet["I3"].value == "—"
+        assert sheet["K2"].value == timedelta(hours=8, minutes=40, seconds=27)
+        assert sheet["K2"].number_format == "[h]:mm:ss"
         assert sheet["J3"].value == "—"
-        assert sheet["J3"].number_format == "[h]:mm:ss"
-        assert sheet["F4"].value == "—"
-        assert sheet["J4"].value == "—"
+        assert sheet["K3"].value == "—"
+        assert sheet["K3"].number_format == "[h]:mm:ss"
+        assert sheet["G4"].value == "—"
+        assert sheet["K4"].value == "—"
     finally:
         app.dependency_overrides.clear()
 
@@ -273,7 +301,7 @@ def test_export_marks_invalid_or_negative_working_hours(monkeypatch, check_in_ti
     client, _attendance = export_client(monkeypatch, [record("2026-09-23", check_in_time=check_in_time, check_out_time=check_out_time)])
     try:
         sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
-        assert sheet["J2"].value == "—"
+        assert sheet["K2"].value == "—"
     finally:
         app.dependency_overrides.clear()
 
@@ -287,8 +315,8 @@ def test_export_embeds_retained_check_in_and_check_out_photos(monkeypatch):
     try:
         sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
         assert len(sheet._images) == 2
-        assert sheet["H2"].value is None
-        assert sheet["L2"].value is None
+        assert sheet["I2"].value is None
+        assert sheet["M2"].value is None
         assert sheet.row_dimensions[2].height == 115
         assert all(image.width <= 200 and image.height <= 150 for image in sheet._images)
     finally:
@@ -303,8 +331,8 @@ def test_expired_or_missing_photos_do_not_fail_export(monkeypatch):
     client, _attendance = export_client(monkeypatch, [record("2026-09-23", check_in_photo_reference={"file_id": "gone"}, check_out_photo_reference=None)])
     try:
         sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
-        assert sheet["H2"].value == "Expired / unavailable"
-        assert sheet["L2"].value == "Expired / unavailable"
+        assert sheet["I2"].value == "Expired / unavailable"
+        assert sheet["M2"].value == "Expired / unavailable"
         assert not sheet._images
     finally:
         app.dependency_overrides.clear()

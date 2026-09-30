@@ -116,15 +116,9 @@ def resolve_export_date_range(
 
 def export_filename(export_range: str, start_date: date, end_date: date) -> str:
     if export_range == "day":
-        suffix = start_date.isoformat()
-    elif export_range == "custom":
-        suffix = f"{start_date.isoformat()}-to-{end_date.isoformat()}"
-    elif export_range == "month":
-        suffix = start_date.strftime("%Y-%m")
-    elif export_range == "months":
-        suffix = f"{start_date.strftime('%Y-%m')}-to-{end_date.strftime('%Y-%m')}"
+        suffix = start_date.strftime("%d-%m-%Y")
     else:
-        suffix = str(start_date.year)
+        suffix = f"{start_date:%d-%m-%Y}-to-{end_date:%d-%m-%Y}"
     return f"aurelix-attendance-{export_range}-{suffix}.xlsx"
 
 
@@ -226,7 +220,7 @@ def export_attendance(
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Attendance"
-    headers = ["Date", "Employee ID", "Employee", "Email", "Department", "Check In", "Check In Location", "Check-in Photo", "Check Out", "Working Hours", "Check Out Location", "Check-out Photo", "Status"]
+    headers = ["Date", "Day", "Employee ID", "Employee", "Email", "Department", "Check In", "Check In Location", "Check-in Photo", "Check Out", "Working Hours", "Check Out Location", "Check-out Photo", "Status"]
     sheet.append(headers)
     for cell in sheet[1]:
         cell.font = Font(bold=True, color="FFFFFF")
@@ -237,22 +231,24 @@ def export_attendance(
         row_number = sheet.max_row + 1
         is_absent = record.get("final_status") == "ABSENT"
         working_hours = excel_working_hours(record.get("check_in_time"), record.get("check_out_time"))
+        attendance_date = date.fromisoformat(record.get("date"))
         sheet.append([
-            record.get("date"), record.get("employee_id"), employee.get("full_name") or record.get("user_name") or record.get("employee_id"), employee.get("email", ""),
+            attendance_date, attendance_date.strftime("%A"), record.get("employee_id"), employee.get("full_name") or record.get("user_name") or record.get("employee_id"), employee.get("email", ""),
             employee.get("department", ""), excel_time_value(record.get("check_in_time")), "—" if is_absent and not record.get("check_in_location") else format_location(record.get("check_in_location")),
             None,
             excel_time_value(record.get("check_out_time")), working_hours, "—" if is_absent and not record.get("check_out_location") else format_location(record.get("check_out_location")),
             None,
             record.get("final_status"),
         ])
-        sheet[f"J{row_number}"].number_format = "[h]:mm:ss"
-        has_check_in_photo = embed_attendance_photo(sheet, f"H{row_number}", record.get("check_in_photo_reference"))
-        has_check_out_photo = embed_attendance_photo(sheet, f"L{row_number}", record.get("check_out_photo_reference"))
+        sheet[f"A{row_number}"].number_format = "dd-mm-yyyy"
+        sheet[f"K{row_number}"].number_format = "[h]:mm:ss"
+        has_check_in_photo = embed_attendance_photo(sheet, f"I{row_number}", record.get("check_in_photo_reference"))
+        has_check_out_photo = embed_attendance_photo(sheet, f"M{row_number}", record.get("check_out_photo_reference"))
         if has_check_in_photo or has_check_out_photo:
             sheet.row_dimensions[row_number].height = 115
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
-    widths = [14, 16, 24, 30, 20, 23, 28, 31, 23, 14, 28, 31, 14]
+    widths = [14, 14, 16, 24, 30, 20, 23, 28, 31, 23, 14, 14, 28, 31, 14]
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[chr(64 + index)].width = width
     for row in sheet.iter_rows(min_row=2):

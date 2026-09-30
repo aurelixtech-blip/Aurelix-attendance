@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, BarChart3, Check, ClipboardList, Download, LogOut, MapPin, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BarChart3, CalendarDays, Check, ClipboardList, Download, LogOut, MapPin, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react'
 import api from './services/api'
 import LocationAttendance from './LocationAttendance'
-import { formatKolkataTime, kolkataDateKey } from './time'
+import { formatIndiaDate, formatKolkataTime, kolkataDateKey, parseIndiaDate } from './time'
 
 function formatLocation(location) {
   if (!location || location.latitude == null || location.longitude == null) return 'Unavailable'
@@ -20,28 +20,54 @@ function statusBadgeClass(status) {
   return status === 'ABSENT' ? 'badge absent' : 'badge verified'
 }
 
+function IndiaDateInput({ value, onChange, required = false, disabled = false }) {
+  const pickerRef = useRef(null)
+  const textRef = useRef(null)
+  const [text, setText] = useState(formatIndiaDate(value))
+  useEffect(() => setText(value ? formatIndiaDate(value) : ''), [value])
+
+  function updateText(nextText, input) {
+    setText(nextText)
+    const isoDate = parseIndiaDate(nextText)
+    input.setCustomValidity(isoDate || !nextText ? '' : 'Enter a valid date as DD-MM-YYYY.')
+    if (isoDate) onChange(isoDate)
+    else if (!nextText) onChange('')
+  }
+
+  function openPicker() {
+    if (pickerRef.current?.showPicker) pickerRef.current.showPicker()
+    else pickerRef.current?.click()
+  }
+
+  return <span className="india-date-control"><input ref={textRef} type="text" inputMode="numeric" placeholder="DD-MM-YYYY" value={text} onChange={event => updateText(event.target.value, event.currentTarget)} onBlur={event => { const isoDate = parseIndiaDate(text); event.currentTarget.setCustomValidity(isoDate || !text ? '' : 'Enter a valid date as DD-MM-YYYY.'); if (isoDate) setText(formatIndiaDate(isoDate)) }} pattern="[0-9]{2}-[0-9]{2}-[0-9]{4}" required={required} disabled={disabled} /><button className="icon-button india-date-calendar" type="button" title="Choose date" aria-label="Choose date" onClick={openPicker} disabled={disabled}><CalendarDays size={16}/></button><input className="india-date-native" ref={pickerRef} type="date" value={value || ''} onChange={event => { onChange(event.target.value); setText(event.target.value ? formatIndiaDate(event.target.value) : ''); textRef.current?.setCustomValidity('') }} tabIndex={-1} aria-hidden="true" /></span>
+}
+
 function exportDetails(criteria) {
   const params = new URLSearchParams({ range: criteria.range })
+  const monthEnd = month => {
+    const [year, monthNumber] = month.split('-').map(Number)
+    return `${month}-${String(new Date(year, monthNumber, 0).getDate()).padStart(2, '0')}`
+  }
   if (criteria.range === 'custom') {
     params.set('start_date', criteria.startDate)
     params.set('end_date', criteria.endDate)
-    return { query: params.toString(), filename: `aurelix-attendance-custom-${criteria.startDate}-to-${criteria.endDate}.xlsx` }
+    return { query: params.toString(), filename: `aurelix-attendance-custom-${formatIndiaDate(criteria.startDate)}-to-${formatIndiaDate(criteria.endDate)}.xlsx` }
   }
   if (criteria.range === 'months') {
     params.set('start_date', `${criteria.startMonth}-01`)
     params.set('end_date', `${criteria.endMonth}-01`)
-    return { query: params.toString(), filename: `aurelix-attendance-months-${criteria.startMonth}-to-${criteria.endMonth}.xlsx` }
+    return { query: params.toString(), filename: `aurelix-attendance-months-${formatIndiaDate(`${criteria.startMonth}-01`)}-to-${formatIndiaDate(monthEnd(criteria.endMonth))}.xlsx` }
   }
   if (criteria.range === 'month') {
     params.set('date', `${criteria.month}-01`)
-    return { query: params.toString(), filename: `aurelix-attendance-month-${criteria.month}.xlsx` }
+    return { query: params.toString(), filename: `aurelix-attendance-month-${formatIndiaDate(`${criteria.month}-01`)}-to-${formatIndiaDate(monthEnd(criteria.month))}.xlsx` }
   }
   if (criteria.range === 'year') {
     params.set('date', `${criteria.year}-01-01`)
-    return { query: params.toString(), filename: `aurelix-attendance-year-${criteria.year}.xlsx` }
+    return { query: params.toString(), filename: `aurelix-attendance-year-01-01-${criteria.year}-to-31-12-${criteria.year}.xlsx` }
   }
   params.set('date', criteria.date)
-  return { query: params.toString(), filename: `aurelix-attendance-day-${criteria.date}.xlsx` }
+  return { query: params.toString(), filename: `aurelix-attendance-day-${formatIndiaDate(criteria.date)}.xlsx` }
 }
 
 async function exportErrorMessage(error) {
@@ -206,7 +232,7 @@ function AdminPhotoModal({ viewer, onClose }) {
       <div className="photo-capture-card admin-photo-card">
         <span className="eyebrow">ATTENDANCE PHOTO</span>
         <h3>{eventLabel} photo</h3>
-        <p className="admin-photo-meta"><b>{viewer.employee}</b><small>Event: {eventLabel}</small><small>Attendance date: {viewer.date || 'Unavailable'}</small><small>Event timestamp: {viewer.timestamp ? `${formatKolkataTime(viewer.timestamp)} IST` : 'Unavailable'}</small></p>
+        <p className="admin-photo-meta"><b>{viewer.employee}</b><small>Event: {eventLabel}</small><small>Attendance date: {viewer.date ? formatIndiaDate(viewer.date) : 'Unavailable'}</small><small>Event timestamp: {viewer.timestamp ? `${formatIndiaDate(viewer.timestamp)} ${formatKolkataTime(viewer.timestamp)} IST` : 'Unavailable'}</small></p>
         {loading && <div className="admin-photo-loading">Loading photo...</div>}
         {error && <div className="error-box"><X size={16}/>{error}</div>}
         {url && <img src={url} alt={`${eventLabel} attendance photo for ${viewer.employee}`} />}
@@ -247,8 +273,8 @@ function ExportDialog({ selectedDate, onClose, onExport, isExporting, exportErro
     <form className="photo-capture-card export-dialog" onSubmit={submit}>
       <div className="export-dialog-heading"><div><span className="eyebrow cyan">ATTENDANCE EXPORT</span><h3 id="export-dialog-title">Export attendance data</h3></div><button className="icon-button" type="button" title="Close export dialog" onClick={onClose} disabled={isExporting}><X size={16}/></button></div>
       <label className="export-field">Export period<select value={range} onChange={event => { setRange(event.target.value); setValidationError('') }} disabled={isExporting}><option value="day">Day</option><option value="custom">Custom Date Range</option><option value="month">Month</option><option value="months">Multiple Months</option><option value="year">Year</option></select></label>
-      {range === 'day' && <label className="export-field">Date<input type="date" value={date} onChange={event => setDate(event.target.value)} disabled={isExporting} required /></label>}
-      {range === 'custom' && <div className="export-month-fields"><label className="export-field">From Date<input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} disabled={isExporting} required /></label><label className="export-field">To Date<input type="date" value={endDate} onChange={event => setEndDate(event.target.value)} disabled={isExporting} required /></label></div>}
+      {range === 'day' && <label className="export-field">Date<IndiaDateInput value={date} onChange={setDate} disabled={isExporting} required /></label>}
+      {range === 'custom' && <div className="export-month-fields"><label className="export-field">From Date<IndiaDateInput value={startDate} onChange={setStartDate} disabled={isExporting} required /></label><label className="export-field">To Date<IndiaDateInput value={endDate} onChange={setEndDate} disabled={isExporting} required /></label></div>}
       {range === 'month' && <label className="export-field">Month<input type="month" value={month} onChange={event => setMonth(event.target.value)} disabled={isExporting} required /></label>}
       {range === 'months' && <div className="export-month-fields"><label className="export-field">Start month<input type="month" value={startMonth} onChange={event => setStartMonth(event.target.value)} disabled={isExporting} required /></label><label className="export-field">End month<input type="month" value={endMonth} onChange={event => setEndMonth(event.target.value)} disabled={isExporting} required /></label></div>}
       {range === 'year' && <label className="export-field">Year<select value={year} onChange={event => setYear(event.target.value)} disabled={isExporting}>{years.map(value => <option value={value} key={value}>{value}</option>)}</select></label>}
@@ -326,7 +352,7 @@ function AdminDashboard() {
     if (!record[`${event}_photo_available`]) return <span className="muted">-</span>
     return <button className="ghost-button table-action" type="button" onClick={() => openPhoto(record, event)}>{event === 'check_in' ? 'View Check-In Photo' : 'View Check-Out Photo'}</button>
   }
-  return <><section className="hero-strip compact"><div><span className="eyebrow cyan">LIVE OPERATIONS / OVERVIEW</span><h2>Attendance register</h2><p>Review employee attendance by day and export the stored check-in/check-out records.</p></div><label className="date-picker">Selected day<input type="date" value={selectedDate} onChange={event => chooseDate(event.target.value)} /></label></section><div className="stats-grid">{[['TOTAL EMPLOYEES', stats.total_employees, Users], ['PRESENT', stats.present_today, Check], ['ABSENT', stats.absent_today, X]].map(([label, value, Icon]) => <div className="stat-card" key={label}><Icon size={17}/><span>{label}</span><strong>{value ?? '-'}</strong></div>)}</div><div className="admin-dashboard-grid"><section className="panel calendar-panel"><div className="panel-heading"><div><span className="eyebrow">ATTENDANCE CALENDAR</span><h3>{new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h3></div><div className="calendar-actions"><button className="icon-button" title="Previous month" onClick={() => shiftMonth(-1)}><ArrowLeft size={16}/></button><button className="icon-button" title="Next month" onClick={() => shiftMonth(1)}><ArrowRight size={16}/></button></div></div><div className="calendar-weekdays">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => <span key={day}>{day}</span>)}</div><div className="calendar-grid">{renderCalendar()}</div></section><section className="panel table-panel"><div className="panel-heading"><div><span className="eyebrow">ATTENDANCE LOG / {selectedDate}</span><h3>Daily Attendance Register</h3></div><button className="ghost-button" type="button" onClick={() => { setExportError(''); setExportDialogOpen(true) }}><Download size={16}/>Export data</button></div><div className="table-scroll"><table><thead><tr><th>Employee</th><th>Department</th><th>In</th><th>In location</th><th>Check-in Photo</th><th>Out</th><th>Out location</th><th>Check-out Photo</th><th>Status</th><th>Action</th></tr></thead><tbody>{records.map(item => <tr key={item.attendance_id}><td><b>{item.employee?.full_name || item.user_name || item.employee_id}</b><small>{item.employee_id}</small></td><td>{item.employee?.department || '-'}</td><td>{item.check_in_time ? `${formatKolkataTime(item.check_in_time)} IST` : '-'}</td><td>{formatLocation(item.check_in_location)}</td><td>{photoCell(item, 'check_in')}</td><td>{item.check_out_time ? `${formatKolkataTime(item.check_out_time)} IST` : 'Open'}</td><td>{formatLocation(item.check_out_location)}</td><td>{photoCell(item, 'check_out')}</td><td><span className={item.final_status === 'PRESENT' ? 'badge verified' : 'badge absent'}>{item.final_status}</span></td><td><button className="ghost-button table-action" onClick={() => clearRecord(item.attendance_id)} disabled={item.attendance_id.startsWith('absent-')}>Undo record</button></td></tr>)}</tbody></table>{!records.length && <div className="empty-state">No active employees found.</div>}</div></section></div>{exportDialogOpen && <ExportDialog selectedDate={selectedDate} onClose={() => setExportDialogOpen(false)} onExport={exportData} isExporting={isExporting} exportError={exportError} />}{photoViewer && <AdminPhotoModal viewer={photoViewer} onClose={() => setPhotoViewer(null)} />}</>
+  return <><section className="hero-strip compact"><div><span className="eyebrow cyan">LIVE OPERATIONS / OVERVIEW</span><h2>Attendance register</h2><p>Review employee attendance by day and export the stored check-in/check-out records.</p></div><label className="date-picker">Selected day<IndiaDateInput value={selectedDate} onChange={chooseDate} /></label></section><div className="stats-grid">{[['TOTAL EMPLOYEES', stats.total_employees, Users], ['PRESENT', stats.present_today, Check], ['ABSENT', stats.absent_today, X]].map(([label, value, Icon]) => <div className="stat-card" key={label}><Icon size={17}/><span>{label}</span><strong>{value ?? '-'}</strong></div>)}</div><div className="admin-dashboard-grid"><section className="panel calendar-panel"><div className="panel-heading"><div><span className="eyebrow">ATTENDANCE CALENDAR</span><h3>{new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h3></div><div className="calendar-actions"><button className="icon-button" title="Previous month" onClick={() => shiftMonth(-1)}><ArrowLeft size={16}/></button><button className="icon-button" title="Next month" onClick={() => shiftMonth(1)}><ArrowRight size={16}/></button></div></div><div className="calendar-weekdays">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => <span key={day}>{day}</span>)}</div><div className="calendar-grid">{renderCalendar()}</div></section><section className="panel table-panel"><div className="panel-heading"><div><span className="eyebrow">ATTENDANCE LOG / {formatIndiaDate(selectedDate)}</span><h3>Daily Attendance Register</h3></div><button className="ghost-button" type="button" onClick={() => { setExportError(''); setExportDialogOpen(true) }}><Download size={16}/>Export data</button></div><div className="table-scroll"><table><thead><tr><th>Employee</th><th>Department</th><th>In</th><th>In location</th><th>Check-in Photo</th><th>Out</th><th>Out location</th><th>Check-out Photo</th><th>Status</th><th>Action</th></tr></thead><tbody>{records.map(item => <tr key={item.attendance_id}><td><b>{item.employee?.full_name || item.user_name || item.employee_id}</b><small>{item.employee_id}</small></td><td>{item.employee?.department || '-'}</td><td>{item.check_in_time ? `${formatKolkataTime(item.check_in_time)} IST` : '-'}</td><td>{formatLocation(item.check_in_location)}</td><td>{photoCell(item, 'check_in')}</td><td>{item.check_out_time ? `${formatKolkataTime(item.check_out_time)} IST` : 'Open'}</td><td>{formatLocation(item.check_out_location)}</td><td>{photoCell(item, 'check_out')}</td><td><span className={item.final_status === 'PRESENT' ? 'badge verified' : 'badge absent'}>{item.final_status}</span></td><td><button className="ghost-button table-action" onClick={() => clearRecord(item.attendance_id)} disabled={item.attendance_id.startsWith('absent-')}>Undo record</button></td></tr>)}</tbody></table>{!records.length && <div className="empty-state">No active employees found.</div>}</div></section></div>{exportDialogOpen && <ExportDialog selectedDate={selectedDate} onClose={() => setExportDialogOpen(false)} onExport={exportData} isExporting={isExporting} exportError={exportError} />}{photoViewer && <AdminPhotoModal viewer={photoViewer} onClose={() => setPhotoViewer(null)} />}</>
 }
 
 function RecoveryEmailVerificationPanel({ challenge, onVerified }) {
@@ -367,10 +393,10 @@ function CreateEmployeePanel({ onCreated }) {
       setMessage(Array.isArray(detail) ? detail.map(item => item.msg).join(' ') : detail || 'Could not create employee.')
     }
   }
-  return <section className="panel form-panel"><span className="eyebrow">PEOPLE / NEW RECORD</span><h2>Add employee</h2><form className="employee-form" onSubmit={submit}>{[['employee_id','Employee ID'],['full_name','Full name'],['email','Login Email'],['recovery_email','Recovery Email'],['department','Department'],['password','Temporary password']].map(([key, label]) => <label key={key}>{label}<input required={key !== 'password'} type={key === 'email' || key === 'recovery_email' ? 'email' : key === 'password' ? 'password' : 'text'} autoComplete={key === 'recovery_email' ? 'email' : undefined} value={form[key]} onChange={event => setForm({ ...form, [key]: event.target.value })}/></label>)}<button className="primary-button" type="submit"><UserPlus size={17}/> Add employee</button></form>{message && <div className="success-box"><Check size={17}/>{message}</div>}{verification && <RecoveryEmailVerificationPanel challenge={verification} onVerified={verificationMessage => { setVerification(null); setMessage(verificationMessage); onCreated() }}/>}</section>
+  return <section className="panel form-panel"><span className="eyebrow">PEOPLE / NEW RECORD</span><h2>Add person</h2><form className="employee-form" onSubmit={submit}>{[['employee_id','Employee ID'],['full_name','Full name'],['email','Login Email'],['recovery_email','Recovery Email'],['department','Department'],['password','Temporary password']].map(([key, label]) => <label key={key}>{label}<input required={key !== 'password'} type={key === 'email' || key === 'recovery_email' ? 'email' : key === 'password' ? 'password' : 'text'} autoComplete={key === 'recovery_email' ? 'email' : undefined} value={form[key]} onChange={event => setForm({ ...form, [key]: event.target.value })}/></label>)}<label>Role<select required value={form.role} onChange={event => setForm({ ...form, role: event.target.value })}><option value="employee">Employee</option><option value="admin">Admin</option></select></label><button className="primary-button" type="submit"><UserPlus size={17}/> Add person</button></form>{message && <div className="success-box"><Check size={17}/>{message}</div>}{verification && <RecoveryEmailVerificationPanel challenge={verification} onVerified={verificationMessage => { setVerification(null); setMessage(verificationMessage); onCreated() }}/>}</section>
 }
 
-function EmployeeEditor({ user }) {
+function EmployeeEditor({ user, onLogout }) {
   const [employees, setEmployees] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [form, setForm] = useState(null)
@@ -394,7 +420,12 @@ function EmployeeEditor({ user }) {
   async function save(event) {
     event.preventDefault()
     try {
-      const { data: updatedEmployee } = await api.put(`/api/employees/${selectedId}`, { employee_id: form.employee_id, full_name: form.full_name, email: form.email, recovery_email: form.recovery_email || null, department: form.department, role: form.role, password: form.password || null })
+      const { data: updatedEmployee } = await api.put(`/api/employees/${selectedId}`, { employee_id: form.employee_id, full_name: form.full_name, email: form.email, recovery_email: form.recovery_email || null, department: form.department, role: form.employee_id === 'ADM-001' ? 'admin' : form.role, password: form.password || null })
+      if (isCurrentUser && updatedEmployee.role !== user?.role) {
+        window.alert('Your role changed. Sign in again to continue.')
+        onLogout()
+        return
+      }
       setSelectedId(updatedEmployee.employee_id)
       setForm({ ...updatedEmployee, password: '' })
       setVerification(updatedEmployee.verification_challenge_token ? { token: updatedEmployee.verification_challenge_token, maskedEmail: updatedEmployee.recovery_email.replace(/^(.).*(@.*)$/, '$1******$2') } : null)
@@ -418,7 +449,7 @@ function EmployeeEditor({ user }) {
     }
   }
   const isCurrentUser = Boolean(form && (form.id === user?.id || form.employee_id === user?.employee_id))
-  return <div className="admin-people-grid"><CreateEmployeePanel onCreated={load}/><section className="panel"><span className="eyebrow">PEOPLE / DIRECTORY</span><h2>Members and admins</h2><div className="people-list">{employees.map(item => <button type="button" className={item.employee_id === selectedId ? 'person-row selected-person' : 'person-row'} onClick={() => selectEmployee(item.employee_id)} key={item.employee_id}><span><b>{item.full_name}</b><small>{item.employee_id} - {item.department} - {item.role}</small></span><span className="muted">Edit</span></button>)}</div></section><section className="panel">{form ? <><span className="eyebrow">PEOPLE / EDIT RECORD</span><h2>Edit employee details</h2><form className="employee-form" onSubmit={save}>{[['employee_id','Employee ID'],['full_name','Full name'],['email','Login Email'],['department','Department'],['password','New password']].map(([key, label]) => <label key={key}>{label}<input type={key === 'email' ? 'email' : key === 'password' ? 'password' : 'text'} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })}/></label>)}<label>Recovery Email<input type="email" autoComplete="email" value={form.recovery_email || ''} onChange={event => setForm({ ...form, recovery_email: event.target.value })}/>{form.recovery_email && <small>{form.recovery_email_verified ? 'Verified' : 'Not verified'}</small>}</label><button className="primary-button" type="submit">Save changes</button>{!isCurrentUser && <button className="ghost-button" type="button" onClick={remove}><Trash2 size={16}/> Remove employee</button>}</form>{message && <div className="success-box"><Check size={17}/>{message}</div>}{verification && <RecoveryEmailVerificationPanel challenge={verification} onVerified={verificationMessage => { setVerification(null); setForm(current => ({ ...current, recovery_email_verified: true })); setMessage(verificationMessage); load() }}/>}</> : <><span className="eyebrow">PEOPLE / EDIT RECORD</span><h2>Select a person</h2><p className="muted">Choose a person from the directory to edit their details.</p></>}</section></div>
+  return <div className="admin-people-grid"><CreateEmployeePanel onCreated={load}/><section className="panel"><span className="eyebrow">PEOPLE / DIRECTORY</span><h2>Members and admins</h2><div className="people-list">{employees.map(item => <button type="button" className={item.employee_id === selectedId ? 'person-row selected-person' : 'person-row'} onClick={() => selectEmployee(item.employee_id)} key={item.employee_id}><span><b>{item.full_name}</b><small>{item.employee_id} - {item.department} - {item.role}</small></span><span className="muted">Edit</span></button>)}</div></section><section className="panel">{form ? <><span className="eyebrow">PEOPLE / EDIT RECORD</span><h2>Edit person details</h2><form className="employee-form" onSubmit={save}>{[['employee_id','Employee ID'],['full_name','Full name'],['email','Login Email'],['department','Department'],['password','New password']].map(([key, label]) => <label key={key}>{label}<input type={key === 'email' ? 'email' : key === 'password' ? 'password' : 'text'} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })}/></label>)}<label>Recovery Email<input type="email" autoComplete="email" value={form.recovery_email || ''} onChange={event => setForm({ ...form, recovery_email: event.target.value })}/>{form.recovery_email && <small>{form.recovery_email_verified ? 'Verified' : 'Not verified'}</small>}</label><label>Role<select required value={form.employee_id === 'ADM-001' ? 'admin' : form.role} disabled={form.employee_id === 'ADM-001'} onChange={event => setForm({ ...form, role: event.target.value })}><option value="employee">Employee</option><option value="admin">Admin</option></select></label><button className="primary-button" type="submit">Save changes</button>{!isCurrentUser && form.employee_id !== 'ADM-001' && <button className="ghost-button" type="button" onClick={remove}><Trash2 size={16}/> Remove {form.role === 'admin' ? 'admin' : 'employee'}</button>}</form>{message && <div className="success-box"><Check size={17}/>{message}</div>}{verification && <RecoveryEmailVerificationPanel challenge={verification} onVerified={verificationMessage => { setVerification(null); setForm(current => ({ ...current, recovery_email_verified: true })); setMessage(verificationMessage); load() }}/>}</> : <><span className="eyebrow">PEOPLE / EDIT RECORD</span><h2>Select a person</h2><p className="muted">Choose a person from the directory to edit their details.</p></>}</section></div>
 }
 
 function History() {
@@ -437,7 +468,7 @@ function History() {
       setError(err.response?.data?.detail || `Could not undo ${label}.`)
     }
   }
-  return <section className="panel table-panel"><span className="eyebrow">MY ATTENDANCE</span><h2>Attendance history</h2>{error && <div className="error-box"><X size={16}/>{error}</div>}<div className="table-scroll"><table><thead><tr><th>Date</th><th>Check in</th><th>Check-in location</th><th>Check out</th><th>Check-out location</th><th>Status</th><th>Actions</th></tr></thead><tbody>{items.map(item => <tr key={item.attendance_id}><td><b>{item.date}</b></td><td>{item.check_in_time ? `${formatKolkataTime(item.check_in_time)} IST` : '-'}</td><td>{formatLocation(item.check_in_location)}</td><td>{item.check_out_time ? `${formatKolkataTime(item.check_out_time)} IST` : 'Open'}</td><td>{formatLocation(item.check_out_location)}</td><td><span className={statusBadgeClass(item.final_status)}>{item.final_status}</span></td><td><button className="ghost-button table-action" disabled={!item.check_in_time} onClick={() => undo(item, 'check_in')}>Undo check-in</button><button className="ghost-button table-action" disabled={!item.check_out_time} onClick={() => undo(item, 'check_out')}>Undo check-out</button></td></tr>)}</tbody></table></div></section>
+  return <section className="panel table-panel"><span className="eyebrow">MY ATTENDANCE</span><h2>Attendance history</h2>{error && <div className="error-box"><X size={16}/>{error}</div>}<div className="table-scroll"><table><thead><tr><th>Date</th><th>Check in</th><th>Check-in location</th><th>Check out</th><th>Check-out location</th><th>Status</th><th>Actions</th></tr></thead><tbody>{items.map(item => <tr key={item.attendance_id}><td><b>{formatIndiaDate(item.date)}</b></td><td>{item.check_in_time ? `${formatKolkataTime(item.check_in_time)} IST` : '-'}</td><td>{formatLocation(item.check_in_location)}</td><td>{item.check_out_time ? `${formatKolkataTime(item.check_out_time)} IST` : 'Open'}</td><td>{formatLocation(item.check_out_location)}</td><td><span className={statusBadgeClass(item.final_status)}>{item.final_status}</span></td><td><button className="ghost-button table-action" disabled={!item.check_in_time} onClick={() => undo(item, 'check_in')}>Undo check-in</button><button className="ghost-button table-action" disabled={!item.check_out_time} onClick={() => undo(item, 'check_out')}>Undo check-out</button></td></tr>)}</tbody></table></div></section>
 }
 
 export default function App() {
@@ -447,5 +478,5 @@ export default function App() {
   if (loading) return <div className="loading">Loading secure workspace...</div>
   if (!user) return <Routes><Route path="*" element={<Login onLogin={setUser}/>}/></Routes>
   const logout = () => { localStorage.removeItem('aurelix_token'); setUser(null) }
-  return <Shell user={user} onLogout={logout}><Routes><Route path="/" element={<Navigate to={user.role === 'admin' ? '/admin' : '/attendance'} replace/>}/><Route path="/attendance" element={<LocationAttendance/>}/><Route path="/history" element={<History/>}/><Route path="/admin" element={user.role === 'admin' ? <AdminDashboard/> : <Navigate to="/attendance"/>}/><Route path="/admin/employees" element={user.role === 'admin' ? <EmployeeEditor user={user}/> : <Navigate to="/attendance"/>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></Shell>
+  return <Shell user={user} onLogout={logout}><Routes><Route path="/" element={<Navigate to={user.role === 'admin' ? '/admin' : '/attendance'} replace/>}/><Route path="/attendance" element={<LocationAttendance/>}/><Route path="/history" element={<History/>}/><Route path="/admin" element={user.role === 'admin' ? <AdminDashboard/> : <Navigate to="/attendance"/>}/><Route path="/admin/employees" element={user.role === 'admin' ? <EmployeeEditor user={user} onLogout={logout}/> : <Navigate to="/attendance"/>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></Shell>
 }

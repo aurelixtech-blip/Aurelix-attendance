@@ -22,14 +22,13 @@ def create_employee(payload: EmployeeCreate, claims: dict = Depends(require_admi
     existing_by_recovery_email = db.employees.find_one({"recovery_email": str(payload.recovery_email).lower(), "recovery_email_verified": True, "is_active": True})
     if existing_by_recovery_email and (not existing_by_id or existing_by_recovery_email.get("_id") != existing_by_id.get("_id")):
         raise HTTPException(status_code=409, detail="Recovery email is already registered")
-    existing = existing_by_id or existing_by_email
-    if existing and existing.get("is_active", True):
+    if existing_by_email and (not existing_by_id or existing_by_email.get("_id") != existing_by_id.get("_id")):
         raise HTTPException(status_code=409, detail="Employee ID or email already exists")
-    if existing_by_id and existing_by_email and existing_by_id.get("_id") != existing_by_email.get("_id"):
+    if existing_by_id and existing_by_id.get("is_active", True):
         raise HTTPException(status_code=409, detail="Employee ID or email already exists")
-    if existing:
-        db.employees.update_one({"_id": existing["_id"]}, {"$set": document})
-        document["_id"] = existing["_id"]
+    if existing_by_id:
+        db.employees.update_one({"_id": existing_by_id["_id"]}, {"$set": document})
+        document["_id"] = existing_by_id["_id"]
         db.audit_logs.insert_one(audit_event("EMPLOYEE_REACTIVATED", claims["sub"], "ACCEPTED", {"employee_id": payload.employee_id}))
         response = admin_employee(document)
         try:
@@ -68,11 +67,17 @@ def update_employee(employee_id: str, payload: EmployeeUpdate, claims: dict = De
     employee = db.employees.find_one({"employee_id": employee_id})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+    if employee.get("employee_id") == "ADM-001" and payload.employee_id != "ADM-001":
+        raise HTTPException(status_code=400, detail="The original System Admin employee ID cannot be changed.")
+    if employee.get("employee_id") == "ADM-001" and payload.role != "admin":
+        raise HTTPException(status_code=400, detail="The original System Admin role cannot be changed.")
     id_conflict = db.employees.find_one({"employee_id": payload.employee_id, "_id": {"$ne": employee["_id"]}})
     email_conflict = db.employees.find_one({"email": payload.email.lower(), "_id": {"$ne": employee["_id"]}})
     if id_conflict or email_conflict:
         raise HTTPException(status_code=409, detail="Employee ID or email already exists")
     changes = {"employee_id": payload.employee_id, "full_name": payload.full_name, "email": payload.email.lower(), "department": payload.department, "role": payload.role}
+    if payload.role != employee.get("role"):
+        changes["auth_version"] = employee.get("auth_version", 0) + 1
     should_verify_recovery_email = False
     if payload.recovery_email is not None:
         recovery_email = str(payload.recovery_email).lower()
@@ -110,10 +115,10 @@ def remove_employee(employee_id: str, claims: dict = Depends(require_admin)):
     employee = db.employees.find_one({"employee_id": employee_id})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+    if employee.get("employee_id") == "ADM-001":
+        raise HTTPException(status_code=400, detail="The original System Admin account cannot be removed.")
     if claims["sub"] == employee.get("employee_id"):
-        raise HTTPException(status_code=400, detail="You cannot remove your own administrator account.")
-    if employee.get("role") == "admin":
-        raise HTTPException(status_code=400, detail="Administrator accounts cannot be removed")
+        raise HTTPException(status_code=400, detail="You cannot remove your own account.")
     db.employees.delete_one({"employee_id": employee_id})
     db.audit_logs.insert_one(audit_event("EMPLOYEE_DELETED", claims["sub"], "ACCEPTED", {"employee_id": employee_id}))
     return {"message": "Employee removed", "employee_id": employee_id}

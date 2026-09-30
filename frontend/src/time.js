@@ -22,10 +22,33 @@ export function formatKolkataTime(value) {
 }
 
 export function formatKolkataDate(value = new Date()) {
-  return new Intl.DateTimeFormat('en-IN', {
+  return new Intl.DateTimeFormat('en-GB', {
     timeZone: KOLKATA_TIME_ZONE,
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(value)).replaceAll('/', '-')
+}
+
+export function formatIndiaDate(value) {
+  if (typeof value === 'string') {
+    const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (dateOnly) return `${dateOnly[3]}-${dateOnly[2]}-${dateOnly[1]}`
+  }
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: KOLKATA_TIME_ZONE,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
   }).format(new Date(value))
+  return parts.replaceAll('/', '-')
+}
+
+export function parseIndiaDate(value) {
+  const match = value.match(/^(\d{2})-(\d{2})-(\d{4})$/)
+  if (!match) return ''
+  const [, day, month, year] = match
+  const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+  if (parsed.getUTCFullYear() !== Number(year) || parsed.getUTCMonth() !== Number(month) - 1 || parsed.getUTCDate() !== Number(day)) return ''
+  return `${year}-${month}-${day}`
 }

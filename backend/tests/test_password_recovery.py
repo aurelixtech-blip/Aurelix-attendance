@@ -136,6 +136,48 @@ def issue_otp(client, recovery_email="pushkar@gmail.com"):
     return response, response.json().get("challenge_token")
 
 
+@pytest.mark.parametrize("role", ["admin", "employee"])
+def test_login_returns_the_database_role(monkeypatch, role):
+    account = make_employee(employee_id="ADM-LOGIN" if role == "admin" else "EMP-LOGIN", role=role)
+    client, _db, _email = recovery_client(monkeypatch, [account])
+
+    response = client.post("/api/auth/login", json={"email": account["email"], "password": "OldPassword123!"})
+
+    assert response.status_code == 200
+    assert response.json()["user"]["role"] == role
+    assert security.decode_access_token(response.json()["access_token"])["role"] == role
+
+
+def test_administrators_authenticate_as_their_own_accounts(monkeypatch):
+    system_admin = make_employee(
+        employee_id="ADM-001",
+        email="system-admin@example.com",
+        recovery_email="system-recovery@example.com",
+        role="admin",
+        password="system-admin-password",
+    )
+    additional_admin = make_employee(
+        employee_id="ADM-002",
+        email="additional-admin@example.com",
+        recovery_email="additional-recovery@example.com",
+        role="admin",
+        password="additional-admin-password",
+    )
+    client, _db, _email = recovery_client(monkeypatch, [system_admin, additional_admin])
+
+    system_login = client.post("/api/auth/login", json={"email": "system-admin@example.com", "password": "system-admin-password"})
+    additional_login = client.post("/api/auth/login", json={"email": "additional-admin@example.com", "password": "additional-admin-password"})
+    cross_login = client.post("/api/auth/login", json={"email": "additional-admin@example.com", "password": "system-admin-password"})
+
+    assert system_login.status_code == 200
+    assert system_login.json()["user"]["employee_id"] == "ADM-001"
+    assert system_login.json()["user"]["role"] == "admin"
+    assert additional_login.status_code == 200
+    assert additional_login.json()["user"]["employee_id"] == "ADM-002"
+    assert additional_login.json()["user"]["role"] == "admin"
+    assert cross_login.status_code == 401
+
+
 def test_password_recovery_sends_otp_only_to_verified_recovery_email(monkeypatch, caplog):
     employee = make_employee()
     client, db, email = recovery_client(monkeypatch, [employee])
