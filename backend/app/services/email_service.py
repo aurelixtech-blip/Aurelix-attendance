@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 class EmailProvider(Protocol):
     def send_otp(self, recovery_email: str, otp: str) -> None: ...
+    def send_attendance_reminder(self, recovery_email: str, employee_name: str, reminder_type: str) -> None: ...
 
 
 class MockEmailProvider:
@@ -18,9 +19,14 @@ class MockEmailProvider:
 
     def __init__(self):
         self.sent_messages = []
+        self.sent_reminders = []
 
     def send_otp(self, recovery_email: str, otp: str) -> None:
         self.sent_messages.append((recovery_email, otp))
+
+    def send_attendance_reminder(self, recovery_email: str, employee_name: str, reminder_type: str) -> None:
+        subject, body = _attendance_reminder_content(employee_name, reminder_type)
+        self.sent_reminders.append((recovery_email, subject, body))
 
 
 _mock_email_provider = MockEmailProvider()
@@ -78,6 +84,48 @@ class SMTPEmailProvider:
                 safe_error,
             )
             raise
+
+    def send_attendance_reminder(self, recovery_email: str, employee_name: str, reminder_type: str) -> None:
+        subject, body = _attendance_reminder_content(employee_name, reminder_type)
+        recipient = mask_email_address(recovery_email) or "<invalid>"
+        message = EmailMessage()
+        message["Subject"] = subject
+        message["From"] = f"{self.from_name} <{self.from_email}>"
+        message["To"] = recovery_email
+        message.set_content(body)
+        phase = "connection"
+        try:
+            with SMTP(self.host, self.port, timeout=10) as smtp:
+                smtp.ehlo()
+                if self.use_tls:
+                    smtp.starttls()
+                    smtp.ehlo()
+                phase = "authentication"
+                smtp.login(self.username, self.password)
+                phase = "message send"
+                smtp.send_message(message)
+        except Exception as exc:
+            logger.error(
+                "Attendance reminder SMTP %s failed host=%s port=%s recipient=%s exception=%s",
+                phase,
+                self.host,
+                self.port,
+                recipient,
+                type(exc).__name__,
+            )
+            raise
+
+
+def _attendance_reminder_content(employee_name: str, reminder_type: str) -> tuple[str, str]:
+    if reminder_type == "check_in":
+        subject = "Aurelix Smart Attendance \u2014 Check-In Reminder"
+        message = "This is a reminder that you have not checked in for today.\n\nPlease complete your attendance check-in."
+    elif reminder_type == "check_out":
+        subject = "Aurelix Smart Attendance \u2014 Check-Out Reminder"
+        message = "This is a reminder that you have checked in today but have not checked out.\n\nPlease complete your attendance check-out."
+    else:
+        raise ValueError("Unsupported attendance reminder type")
+    return subject, f"Hello {employee_name},\n\n{message}\n\nAurelix Smart Attendance"
 
 
 def _redact_smtp_error(message: str, username: str, password: str, from_email: str, recipient: str, otp: str) -> str:

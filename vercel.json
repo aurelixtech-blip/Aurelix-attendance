@@ -30,5 +30,15 @@
         "service": "frontend"
       }
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/attendance-reminders/check-in",
+      "schedule": "30 6 * * *"
+    },
+    {
+      "path": "/api/cron/attendance-reminders/check-out",
+      "schedule": "0 14 * * *"
+    }
   ]
 }

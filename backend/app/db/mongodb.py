@@ -25,6 +25,10 @@ def init_indexes() -> None:
     db.password_reset_sessions.create_index("cleanup_at", expireAfterSeconds=0)
     db.attendance.create_index([("employee_id", ASCENDING), ("date", DESCENDING)])
     db.attendance.create_index([("employee_id", ASCENDING), ("date", ASCENDING)], unique=True)
+    db.attendance_reminders.create_index(
+        [("employee_id", ASCENDING), ("date", ASCENDING), ("reminder_type", ASCENDING)],
+        unique=True,
+    )
     db.audit_logs.create_index([("created_at", DESCENDING)])
     db.fs.files.create_index("metadata.expires_at")
     db.fs.files.create_index("metadata.event")

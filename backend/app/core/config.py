@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     photo_retention_hours: int = Field(default=24, validation_alias="PHOTO_RETENTION_HOURS")
     photo_cleanup_interval_seconds: int = Field(default=900, validation_alias="PHOTO_CLEANUP_INTERVAL_SECONDS")
     photo_cleanup_secret: str | None = Field(default=None, validation_alias="PHOTO_CLEANUP_SECRET")
+    cron_secret: str | None = Field(default=None, validation_alias="CRON_SECRET")
+    attendance_reminder_test_email: str | None = Field(default=None, validation_alias="ATTENDANCE_REMINDER_TEST_EMAIL")
     email_provider: str = Field(default="mock", validation_alias="EMAIL_PROVIDER")
     smtp_host: str | None = Field(default=None, validation_alias="SMTP_HOST")
     smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
