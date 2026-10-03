@@ -30,5 +30,4 @@ def init_indexes() -> None:
         unique=True,
     )
     db.audit_logs.create_index([("created_at", DESCENDING)])
-    db.fs.files.create_index("metadata.expires_at")
     db.fs.files.create_index("metadata.event")

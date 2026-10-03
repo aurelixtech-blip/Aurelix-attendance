@@ -1,9 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.services.photo_service import reference_is_expired
-
-
 def attendance_document(employee_id: str, date: str, user_name: str | None = None) -> dict:
     now = datetime.now(timezone.utc)
     return {
@@ -33,8 +30,8 @@ def _utc_datetime(value):
 
 def public_attendance(document: dict) -> dict:
     record = {key: document.get(key) for key in ("attendance_id", "employee_id", "user_name", "date", "check_in_time", "check_out_time", "check_in_location", "check_out_location", "final_status")}
-    record["check_in_photo_available"] = bool(document.get("check_in_photo_reference")) and not reference_is_expired(document.get("check_in_photo_reference"))
-    record["check_out_photo_available"] = bool(document.get("check_out_photo_reference")) and not reference_is_expired(document.get("check_out_photo_reference"))
+    record["check_in_photo_available"] = bool(document.get("check_in_photo_reference"))
+    record["check_out_photo_available"] = bool(document.get("check_out_photo_reference"))
     record.pop("check_in_photo_reference", None)
     record.pop("check_out_photo_reference", None)
     record["check_in_time"] = _utc_datetime(record["check_in_time"])

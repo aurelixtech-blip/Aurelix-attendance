@@ -304,19 +304,6 @@ export default function LocationAttendance() {
     }
   }
 
-  async function undo(item, undoAction) {
-    const label = undoAction === 'check_in' ? 'check-in' : 'check-out'
-    if (!window.confirm(`Undo this ${label}?`)) return
-    setError('')
-    try {
-      await api.delete(`/api/attendance/mine/${item.attendance_id}?action=${undoAction}`)
-      setMessage(`${label[0].toUpperCase() + label.slice(1)} undone.`)
-      await loadHistory()
-    } catch (requestError) {
-      setError(requestError.response?.data?.detail || `Could not undo ${label}.`)
-    }
-  }
-
   return <>
     <section className="hero-strip"><div><span className="eyebrow cyan">TODAY / {formatKolkataDate().toUpperCase()}</span><h2>Record your presence</h2><p>Open the camera on this page, take one photo, then record your attendance and current location when available.</p></div><div className="verification-state"><span className="pulse-dot"/> Attendance ready</div></section>
     <div className="attendance-grid"><section className="panel verification-panel"><div className="panel-heading"><div><span className="eyebrow">AURELIX ATTENDANCE</span><h3>{action === 'check_in' ? 'Check in' : 'Check out'}</h3></div><span className="step-count">PHOTO</span></div>
@@ -339,6 +326,6 @@ export default function LocationAttendance() {
         </div>
       </div>}
       {message && <div className="success-box"><Check size={17}/>{message}</div>}{error && <div className="error-box"><X size={16}/>{error}</div>}<div className="checks"><span><Camera size={15}/> Photo required before recording</span><span><MapPin size={15}/> One-time browser location</span><span><Check size={15}/> Server timestamp recorded</span></div>{import.meta.env.DEV && locationDiagnostics && <div className="location-diagnostics"><h4>Development location diagnostics</h4><span>Device: {locationDiagnostics.device}</span><span>Browser: {locationDiagnostics.browser}</span><span>Secure context: {locationDiagnostics.secureContext ? 'yes' : 'no'}</span><span>Permission: {locationDiagnostics.permission}</span><span>Readings: {locationDiagnostics.readings.length}</span>{locationDiagnostics.selected && <><span>Latitude: {locationDiagnostics.selected.latitude}</span><span>Longitude: {locationDiagnostics.selected.longitude}</span><span>Accuracy: {locationDiagnostics.selected.accuracy} meters</span><span>Timestamp: {formatIndiaDate(locationDiagnostics.selected.timestamp)} {formatKolkataTime(locationDiagnostics.selected.timestamp)} IST</span><span>Selected: lowest accuracy reading</span></>}{locationDiagnostics.resolvedArea && <span>Reverse-geocoded area: {locationDiagnostics.resolvedArea}</span>}</div>}</section><section className="panel status-panel"><div className="panel-heading"><h3>Today's status</h3></div><div className={todayRecord?.final_status === 'ABSENT' ? 'big-status absent' : 'big-status'}>{todayRecord?.final_status || 'READY'}<small>{todayRecord?.check_in_time ? `In ${formatKolkataTime(todayRecord.check_in_time)} IST` : 'No check-in recorded'}</small></div><div className="history-list">{todayRecord && <><div className="history-row"><span>Check-in location</span><LocationDetails location={todayRecord.check_in_location}/></div><div className="history-row"><span>Check-out</span><b>{todayRecord.check_out_time ? `${formatKolkataTime(todayRecord.check_out_time)} IST` : 'Open'}</b></div><div className="history-row"><span>Check-out location</span><LocationDetails location={todayRecord.check_out_location}/></div></>}</div></section></div>
-    <section className="panel table-panel"><span className="eyebrow">MY ATTENDANCE</span><h2>Attendance history</h2><div className="history-list">{history.map(item => <div className="history-row attendance-history-row" key={item.attendance_id}><b>{formatIndiaDate(item.date)}</b><span>{item.check_in_time ? `${formatKolkataTime(item.check_in_time)} IST` : '-'}</span><LocationDetails location={item.check_in_location}/><span>{item.check_out_time ? `${formatKolkataTime(item.check_out_time)} IST` : 'Open'}</span><LocationDetails location={item.check_out_location}/><span className={statusBadgeClass(item.final_status)}>{item.final_status}</span>{item.check_in_time && <button className="ghost-button table-action" onClick={() => undo(item, 'check_in')}>Undo check-in</button>}{item.check_out_time && <button className="ghost-button table-action" onClick={() => undo(item, 'check_out')}>Undo check-out</button>}</div>)}</div></section>
+    <section className="panel table-panel"><span className="eyebrow">MY ATTENDANCE</span><h2>Attendance history</h2><div className="history-list">{history.map(item => <div className="history-row attendance-history-row" key={item.attendance_id}><b>{formatIndiaDate(item.date)}</b><span>{item.check_in_time ? `${formatKolkataTime(item.check_in_time)} IST` : '-'}</span><LocationDetails location={item.check_in_location}/><span>{item.check_out_time ? `${formatKolkataTime(item.check_out_time)} IST` : 'Open'}</span><LocationDetails location={item.check_out_location}/><span className={statusBadgeClass(item.final_status)}>{item.final_status}</span></div>)}</div></section>
   </>
 }

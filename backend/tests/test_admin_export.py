@@ -7,10 +7,11 @@ from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 from PIL import Image
 
+from app.api import attendance as attendance_api
 from app.api import admin as admin_api
 from app.core.security import current_claims
 from app.main import app
-from app.services.photo_service import PhotoExpiredError
+from app.services.photo_service import PhotoUnavailableError
 
 
 class MemoryCursor:
@@ -306,14 +307,16 @@ def test_export_marks_invalid_or_negative_working_hours(monkeypatch, check_in_ti
         app.dependency_overrides.clear()
 
 
-def test_export_embeds_retained_check_in_and_check_out_photos(monkeypatch):
+def test_export_embeds_old_check_in_and_check_out_photos_without_expiry(monkeypatch):
     image_buffer = BytesIO()
     Image.new("RGB", (800, 400), "navy").save(image_buffer, format="JPEG")
     image_data = image_buffer.getvalue()
     monkeypatch.setattr(admin_api, "open_photo", lambda _reference: BytesIO(image_data))
-    client, _attendance = export_client(monkeypatch, [record("2026-09-23", check_in_photo_reference={"file_id": "in"}, check_out_photo_reference={"file_id": "out"})])
+    old_date = "2023-09-23"
+    old_expiry = datetime(2023, 9, 24, tzinfo=timezone.utc)
+    client, _attendance = export_client(monkeypatch, [record(old_date, check_in_photo_reference={"file_id": "in", "expires_at": old_expiry}, check_out_photo_reference={"file_id": "out", "expires_at": old_expiry})])
     try:
-        sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
+        sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": old_date}))
         assert len(sheet._images) == 2
         assert sheet["I2"].value is None
         assert sheet["M2"].value is None
@@ -323,17 +326,103 @@ def test_export_embeds_retained_check_in_and_check_out_photos(monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_expired_or_missing_photos_do_not_fail_export(monkeypatch):
-    def expired(_reference):
-        raise PhotoExpiredError("Photo expired or unavailable")
+def test_unavailable_or_missing_photos_do_not_fail_export(monkeypatch):
+    def unavailable(_reference):
+        raise PhotoUnavailableError("Photo unavailable")
 
-    monkeypatch.setattr(admin_api, "open_photo", expired)
+    monkeypatch.setattr(admin_api, "open_photo", unavailable)
     client, _attendance = export_client(monkeypatch, [record("2026-09-23", check_in_photo_reference={"file_id": "gone"}, check_out_photo_reference=None)])
     try:
         sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
-        assert sheet["I2"].value == "Expired / unavailable"
-        assert sheet["M2"].value == "Expired / unavailable"
+        assert sheet["I2"].value == "Unavailable"
+        assert sheet["M2"].value == "—"
         assert not sheet._images
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_exports_reflect_undo_actions_and_keep_unaffected_photo(monkeypatch):
+    old_expiry = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    attendance_record = record(
+        "2026-09-23",
+        _id="mongo-1",
+        attendance_id="att-1",
+        check_in_photo_reference={"file_id": "in", "content_type": "image/jpeg", "expires_at": old_expiry},
+        check_out_photo_reference={"file_id": "out", "content_type": "image/jpeg", "expires_at": old_expiry},
+    )
+
+    class MutableAttendance:
+        def __init__(self):
+            self.records = [attendance_record]
+
+        def find(self, query, _projection=None):
+            bounds = query.get("date", {})
+            return MemoryCursor([
+                item for item in self.records
+                if bounds.get("$gte", "") <= item["date"] <= bounds.get("$lte", "9999-12-31")
+            ])
+
+        def find_one(self, query):
+            return next((item for item in self.records if item.get("attendance_id") == query.get("attendance_id")), None)
+
+        def update_one(self, query, update):
+            target = next((item for item in self.records if item.get("_id") == query.get("_id")), None)
+            if not target:
+                return SimpleNamespace(matched_count=0)
+            for key, condition in query.items():
+                if key == "_id":
+                    continue
+                if isinstance(condition, dict) and "$ne" in condition:
+                    if target.get(key) == condition["$ne"]:
+                        return SimpleNamespace(matched_count=0)
+                elif target.get(key) != condition:
+                    return SimpleNamespace(matched_count=0)
+            target.update(update["$set"])
+            return SimpleNamespace(matched_count=1)
+
+    class Employees:
+        def find(self, query, _projection=None):
+            if "employee_id" in query:
+                return [{"employee_id": "EMP-1", "full_name": "Asha Rao", "email": "asha@example.com", "department": "Operations"}]
+            return [{"employee_id": "EMP-1", "full_name": "Asha Rao", "email": "asha@example.com", "department": "Operations", "role": "employee", "is_active": True}]
+
+    class Audit:
+        def insert_one(self, _document):
+            return None
+
+    attendance = MutableAttendance()
+    db = SimpleNamespace(attendance=attendance, employees=Employees(), audit_logs=Audit())
+    monkeypatch.setattr(attendance_api, "get_db", lambda: db)
+    monkeypatch.setattr(admin_api, "get_db", lambda: db)
+    image_buffer = BytesIO()
+    Image.new("RGB", (32, 24), "navy").save(image_buffer, format="JPEG")
+    image_data = image_buffer.getvalue()
+    monkeypatch.setattr(admin_api, "open_photo", lambda _reference: BytesIO(image_data))
+    app.dependency_overrides[current_claims] = lambda: {"sub": "ADM-1", "role": "admin"}
+    client = TestClient(app)
+    try:
+        checkout_undo = client.post("/api/attendance/admin/att-1/undo-check-out")
+        assert checkout_undo.status_code == 200
+        checkout_sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
+        assert checkout_sheet["J2"].value == "—"
+        assert checkout_sheet["K2"].value == "—"
+        assert len(checkout_sheet._images) == 1
+        assert checkout_sheet["I2"].value is None
+        assert checkout_sheet["M2"].value == "—"
+        assert attendance_record["check_in_photo_reference"]["file_id"] == "in"
+        assert attendance_record["check_out_photo_reference"] is None
+
+        checkin_undo = client.post("/api/attendance/admin/att-1/undo-check-in")
+        assert checkin_undo.status_code == 200
+        checkin_sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
+        assert checkin_sheet["G2"].value == "—"
+        assert checkin_sheet["J2"].value == "—"
+        assert checkin_sheet["I2"].value == "—"
+        assert checkin_sheet["M2"].value == "—"
+        assert not checkin_sheet._images
+        assert attendance_record["check_in_photo_reference"] is None
+        assert attendance_record["check_out_photo_reference"] is None
+        assert attendance_record["final_status"] == "ABSENT"
     finally:
         app.dependency_overrides.clear()
 

@@ -10,7 +10,7 @@ from app.models.attendance import public_attendance
 from app.models.audit import audit_event
 from app.schemas.attendance import AttendanceResponse, VerificationRequest
 from app.services.attendance_service import verify_and_record
-from app.services.photo_service import PENDING_ATTENDANCE_ID, PhotoExpiredError, bind_photo_to_attendance, delete_photo, open_photo, prepare_photo, store_photo
+from app.services.photo_service import PENDING_ATTENDANCE_ID, PhotoUnavailableError, bind_photo_to_attendance, delete_photo, open_photo, prepare_photo, store_photo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/attendance", tags=["attendance"])
@@ -58,40 +58,64 @@ def mine(employee: dict = Depends(current_employee)):
         if not item.get("check_in_time") and item.get("check_out_time"):
             db.attendance.update_one(
                 {"_id": item["_id"]},
-                {"$set": {"check_out_time": None, "check_out_location": None, "final_status": "ABSENT", "updated_at": datetime.now(timezone.utc)}},
+                {"$set": {"check_out_time": None, "check_out_location": None, "check_out_photo_reference": None, "final_status": "ABSENT", "updated_at": datetime.now(timezone.utc)}},
             )
             item["check_out_time"] = None
             item["check_out_location"] = None
+            item["check_out_photo_reference"] = None
             item["final_status"] = "ABSENT"
         records.append(public_attendance(item))
     return records
 
-@router.delete("/mine/{attendance_id}")
-def undo_mine(attendance_id: str, action: str = Query("record", pattern=r"^(check_in|check_out|record)$"), employee: dict = Depends(current_employee)):
+def _undo_attendance_event(attendance_id: str, event: str, claims: dict) -> dict:
     db = get_db()
-    record = db.attendance.find_one({"attendance_id": attendance_id, "employee_id": employee["employee_id"]})
+    record = db.attendance.find_one({"attendance_id": attendance_id})
     if not record:
-        raise HTTPException(status_code=404, detail="Your attendance record was not found")
-    if action == "record":
-        delete_photo(record.get("check_in_photo_reference"))
-        delete_photo(record.get("check_out_photo_reference"))
-        db.attendance.delete_one({"_id": record["_id"]})
+        raise HTTPException(status_code=404, detail="Attendance record not found")
+
+    now = datetime.now(timezone.utc)
+    if event == "check_in":
+        if not record.get("check_in_time"):
+            raise HTTPException(status_code=409, detail="No check-in time is recorded")
+        if record.get("check_out_time"):
+            raise HTTPException(status_code=409, detail="Undo Check Out first before undoing Check In.")
+        changes = {
+            "check_in_time": None,
+            "check_in_location": None,
+            "check_in_photo_reference": None,
+            "check_out_location": None,
+            "check_out_photo_reference": None,
+            "final_status": "ABSENT",
+            "updated_at": now,
+        }
+        guard = {"check_in_time": {"$ne": None}, "check_out_time": None}
+        event_type = "UNDO_CHECK_IN"
     else:
-        changes = {"updated_at": datetime.now(timezone.utc)}
-        if action == "check_in":
-            delete_photo(record.get("check_in_photo_reference"))
-            delete_photo(record.get("check_out_photo_reference"))
-            changes.update({"check_in_time": None, "check_in_location": None, "check_out_time": None, "check_out_location": None, "final_status": "ABSENT"})
-            changes.update({"check_in_photo_reference": None, "check_out_photo_reference": None})
-        elif not record.get("check_out_time"):
-            raise HTTPException(status_code=400, detail="No check-out time is recorded")
-        else:
-            delete_photo(record.get("check_out_photo_reference"))
-            changes.update({"check_out_time": None, "check_out_location": None, "final_status": "PRESENT"})
-            changes.update({"check_out_photo_reference": None})
-        db.attendance.update_one({"_id": record["_id"]}, {"$set": changes})
-    db.audit_logs.insert_one(audit_event("EMPLOYEE_ATTENDANCE_UNDO", employee["employee_id"], "ACCEPTED", {"attendance_id": attendance_id, "date": record["date"], "action": action}))
-    return {"message": f"Your {action.replace('_', '-')} was undone", "attendance_id": attendance_id, "action": action}
+        if not record.get("check_out_time"):
+            raise HTTPException(status_code=409, detail="No check-out time is recorded")
+        changes = {
+            "check_out_time": None,
+            "check_out_location": None,
+            "check_out_photo_reference": None,
+            "final_status": "PRESENT",
+            "updated_at": now,
+        }
+        guard = {"check_out_time": {"$ne": None}, "check_in_time": {"$ne": None}}
+        event_type = "UNDO_CHECK_OUT"
+
+    result = db.attendance.update_one({"_id": record["_id"], **guard}, {"$set": changes})
+    if result.matched_count != 1:
+        raise HTTPException(status_code=409, detail="Attendance changed while the undo was being applied. Refresh and try again.")
+
+    db.audit_logs.insert_one(
+        audit_event(
+            event_type,
+            claims["sub"],
+            "ACCEPTED",
+            {"attendance_id": attendance_id, "employee_id": record["employee_id"], "date": record["date"]},
+        )
+    )
+    return {"message": f"Undo {event.replace('_', ' ').title()} completed", "attendance_id": attendance_id, "action": event}
 
 @router.get("/admin")
 def all_attendance(_claims: dict = Depends(require_admin), date: str | None = Query(default=None), employee_id: str | None = Query(default=None), status: str | None = Query(default=None)):
@@ -122,18 +146,13 @@ def attendance_month(month: str = Query(..., pattern=r"^\d{4}-\d{2}$"), _claims:
     records = get_db().attendance.find({"date": {"$regex": f"^{year}-{month_number}-"}}, {"_id": 0, "employee_id": 1, "date": 1, "final_status": 1})
     return list(records)
 
-@router.delete("/admin/{attendance_id}")
-def clear_attendance(attendance_id: str, claims: dict = Depends(require_admin)):
-    db = get_db()
-    record = db.attendance.find_one({"attendance_id": attendance_id})
-    if not record:
-        raise HTTPException(status_code=404, detail="Attendance record not found")
-    delete_photo(record.get("check_in_photo_reference"))
-    delete_photo(record.get("check_out_photo_reference"))
-    db.attendance.delete_one({"_id": record["_id"]})
-    db.audit_logs.insert_one(audit_event("ATTENDANCE_RECORD_CLEARED", claims["sub"], "ACCEPTED", {"attendance_id": attendance_id, "employee_id": record["employee_id"], "date": record["date"]}))
-    return {"message": "Attendance record cleared", "attendance_id": attendance_id}
+@router.post("/admin/{attendance_id}/undo-check-in")
+def undo_check_in(attendance_id: str, claims: dict = Depends(require_admin)):
+    return _undo_attendance_event(attendance_id, "check_in", claims)
 
+@router.post("/admin/{attendance_id}/undo-check-out")
+def undo_check_out(attendance_id: str, claims: dict = Depends(require_admin)):
+    return _undo_attendance_event(attendance_id, "check_out", claims)
 
 @router.get("/admin/{attendance_id}/photo")
 def attendance_photo(attendance_id: str, event: str = Query(..., pattern=r"^(check_in|check_out)$"), _claims: dict = Depends(require_admin)):
@@ -142,14 +161,14 @@ def attendance_photo(attendance_id: str, event: str = Query(..., pattern=r"^(che
         raise HTTPException(status_code=404, detail="Attendance record not found")
     reference = record.get(f"{event}_photo_reference")
     if not reference:
-        raise HTTPException(status_code=404, detail="Photo expired or unavailable")
+        raise HTTPException(status_code=404, detail="Photo unavailable")
     try:
         stream = open_photo(reference)
         return Response(content=stream.read(), media_type=reference.get("content_type", "image/jpeg"), headers={"Cache-Control": "private, no-store"})
-    except PhotoExpiredError as exc:
-        raise HTTPException(status_code=410, detail="Photo expired or unavailable") from exc
+    except PhotoUnavailableError as exc:
+        raise HTTPException(status_code=404, detail="Photo unavailable") from exc
     except Exception as exc:
-        raise HTTPException(status_code=404, detail="Photo expired or unavailable") from exc
+        raise HTTPException(status_code=404, detail="Photo unavailable") from exc
 
 @router.get("/dashboard")
 def dashboard(_claims: dict = Depends(require_admin)):

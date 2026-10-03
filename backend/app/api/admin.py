@@ -1,41 +1,15 @@
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
-import secrets
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from openpyxl.drawing.image import Image as ExcelImage
 from PIL import Image
-from app.core.config import get_settings
-from app.core.security import decode_access_token, require_admin
+from app.core.security import require_admin
 from app.db.mongodb import get_db
-from app.services.photo_service import PhotoExpiredError, cleanup_expired_photos, open_photo
-
-optional_bearer = HTTPBearer(auto_error=False)
-
-
-def require_photo_cleanup_access(
-    credentials: HTTPAuthorizationCredentials | None = Depends(optional_bearer),
-    x_photo_cleanup_secret: str | None = Header(default=None),
-) -> dict:
-    settings = get_settings()
-    configured_secret = settings.photo_cleanup_secret
-    if configured_secret:
-        if x_photo_cleanup_secret and secrets.compare_digest(x_photo_cleanup_secret, configured_secret):
-            return {"role": "cron"}
-        if credentials and secrets.compare_digest(credentials.credentials, configured_secret):
-            return {"role": "cron"}
-    if credentials:
-        try:
-            claims = decode_access_token(credentials.credentials)
-        except HTTPException:
-            claims = None
-        if claims and claims.get("role") == "admin":
-            return claims
-    raise HTTPException(status_code=403, detail="Photo cleanup requires administrator access or a valid cleanup secret")
+from app.services.photo_service import PhotoUnavailableError, open_photo
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 KOLKATA_TIME_ZONE = ZoneInfo("Asia/Kolkata")
@@ -123,10 +97,10 @@ def export_filename(export_range: str, start_date: date, end_date: date) -> str:
 
 
 def embed_attendance_photo(sheet, cell_coordinate: str, reference: dict | None) -> bool:
-    """Embed a retained GridFS photo without exposing its storage identifier."""
+    """Embed a permanent GridFS photo without exposing its storage identifier."""
     cell = sheet[cell_coordinate]
     if not reference:
-        cell.value = "Expired / unavailable"
+        cell.value = "—"
         return False
     try:
         stream = open_photo(reference)
@@ -146,12 +120,12 @@ def embed_attendance_photo(sheet, cell_coordinate: str, reference: dict | None) 
         image.anchor = cell_coordinate
         sheet.add_image(image)
         return True
-    except (PhotoExpiredError, OSError, ValueError, KeyError, TypeError):
-        cell.value = "Expired / unavailable"
+    except (PhotoUnavailableError, OSError, ValueError, KeyError, TypeError):
+        cell.value = "Unavailable"
         return False
     except Exception:
         # Exports must remain available when a GridFS file was deleted or corrupted.
-        cell.value = "Expired / unavailable"
+        cell.value = "Unavailable"
         return False
 
 @router.get("/export")
@@ -263,9 +237,3 @@ def export_attendance(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-
-
-@router.api_route("/photos/cleanup", methods=["GET", "POST"])
-def run_expired_photo_cleanup(_access: dict = Depends(require_photo_cleanup_access)):
-    result = cleanup_expired_photos()
-    return {"message": "Expired attendance photos were cleaned up", **result}

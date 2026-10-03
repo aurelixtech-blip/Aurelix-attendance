@@ -80,9 +80,6 @@ Open `http://localhost:5173`.
 | `REVERSE_GEOCODE_TIMEOUT_SECONDS` | Maximum reverse-geocoding request time |
 | `GOOGLE_MAPS_API_KEY` | Optional backend-only Google Maps Geocoding API key; when set, Google address components are used |
 | `GOOGLE_GEOCODE_URL` | Google Geocoding endpoint |
-| `PHOTO_RETENTION_HOURS` | Attendance photo lifetime in GridFS; defaults to 24 |
-| `PHOTO_CLEANUP_INTERVAL_SECONDS` | How often a long-running API process deletes expired photos; defaults to 900. Set to `0` to disable the in-process loop |
-| `PHOTO_CLEANUP_SECRET` | Shared secret for the protected photo cleanup endpoint used by external cron jobs |
 | `EMAIL_PROVIDER` | `mock` for development/tests or `smtp` for password-recovery email delivery |
 | `SMTP_HOST` | SMTP server hostname, such as `smtp.gmail.com` |
 | `SMTP_PORT` | SMTP port; defaults to `587` |
@@ -120,11 +117,9 @@ Configure these Vercel Production environment variables before using login or at
 
 The backend must use a hosted MongoDB/Atlas instance. The local default `mongodb://localhost:27017` is only suitable for local development and causes production login requests to fail because Vercel cannot access the developer machine's MongoDB.
 
-Attendance photos are private GridFS objects and expire after 24 hours. A long-running Uvicorn process also runs cleanup on an interval. Serverless/Vercel deployments should call the protected cleanup endpoint on a schedule, for example hourly:
+Attendance photos are private GridFS objects stored permanently without an expiry timestamp. There is no scheduled photo cleanup task or photo cleanup endpoint. Attendance photos that were physically deleted before this change cannot be restored; photos that still exist remain linked to their attendance records and available to administrators and Excel exports.
 
-`GET` or `POST` `/api/admin/photos/cleanup` with header `X-Photo-Cleanup-Secret: <PHOTO_CLEANUP_SECRET>`
 
-or `Authorization: Bearer <PHOTO_CLEANUP_SECRET>`. Do not expose this route without the secret or an admin JWT.
 
 ## First Admin And Employee Registration
 
@@ -146,9 +141,11 @@ Sign in as the admin and open **People** to create and manage employees.
 2. Employee clicks **Check in** or **Check out**. The same attendance page opens an in-page camera preview using `navigator.mediaDevices.getUserMedia` (rear/environment camera when available). The employee takes a photo, can retake it, then confirms **Use Photo & Check In** or **Use Photo & Check Out**. Only that confirmed photo is uploaded. File attachment is not the normal flow.
 3. After the photo is confirmed, the frontend requests the current browser location once.
 4. If location is available, latitude, longitude, and accuracy are sent to the backend together with the photo. The backend resolves a concise area name through reverse geocoding; if that lookup fails, the attendance action still continues with the coordinates.
-5. The backend records the official server-side timestamp, authenticated employee identity, coordinates, and resolved area when available. The photo is stored privately in MongoDB GridFS and expires after 24 hours.
+5. The backend records the official server-side timestamp, authenticated employee identity, coordinates, and resolved area when available. The photo is stored privately and permanently in MongoDB GridFS.
 6. The backend prevents a second check-in before check-out and prevents check-out without an active check-in.
-7. Attendance history displays the resolved area and city for check-in/check-out locations and retains coordinates and accuracy in the stored record. Admins can view check-in/check-out photos from the attendance register until they expire.
+7. Attendance history displays the resolved area and city for check-in/check-out locations and retains coordinates and accuracy in the stored record. Admins can view check-in/check-out photos from the attendance register indefinitely while the underlying GridFS object remains available.
+
+Only administrators can reverse attendance events. **Undo Check Out** clears only check-out data and its photo reference; **Undo Check In** clears only check-in data and is blocked until any check-out has first been undone. Each successful operation is audit logged, and the photo file itself is not deleted.
 
 The application does not continuously track employees and does not reject attendance based on coordinates.
 

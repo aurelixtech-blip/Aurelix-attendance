@@ -53,13 +53,25 @@ class MemoryAttendance:
         self.deleted = True
 
     def update_one(self, _query, update):
+        for key, condition in _query.items():
+            if key == "_id":
+                continue
+            if isinstance(condition, dict) and "$ne" in condition:
+                if self.record.get(key) == condition["$ne"]:
+                    return SimpleNamespace(matched_count=0, modified_count=0)
+            elif self.record.get(key) != condition:
+                return SimpleNamespace(matched_count=0, modified_count=0)
         self.updated = update["$set"]
         self.record.update(self.updated)
+        return SimpleNamespace(matched_count=1, modified_count=1)
 
 
 class MemoryAudit:
+    def __init__(self):
+        self.events = []
+
     def insert_one(self, _document):
-        return None
+        self.events.append(_document)
 
 
 def override_employee():
@@ -147,8 +159,8 @@ def test_store_photo_writes_gridfs_with_metadata(monkeypatch):
     assert uploads[0][1]["attendance_id"] == PENDING_ATTENDANCE_ID
     assert uploads[0][1]["employee_id"] == "EMP-1"
     assert uploads[0][1]["event"] == "check_in"
-    assert "expires_at" in uploads[0][1]
-    assert reference["expires_at"] == uploads[0][1]["expires_at"]
+    assert "expires_at" not in uploads[0][1]
+    assert "expires_at" not in reference
 
 
 def test_photo_preparation_resizes_oversized_dimensions():
@@ -396,80 +408,144 @@ def test_employee_receives_403_for_admin_photo_retrieval():
         clear_overrides()
 
 
-def test_undo_check_in_deletes_photos(monkeypatch):
-    deleted = []
+def test_admin_undo_check_in_removes_only_check_in_and_audits(monkeypatch):
     record = {
         "_id": "mongo-1",
         "attendance_id": "att-1",
         "employee_id": "EMP-1",
         "date": "2026-09-24",
+        "user_name": "Test Employee",
+        "check_in_time": datetime.now(timezone.utc),
+        "check_in_location": {"latitude": 1.0, "longitude": 2.0},
         "check_in_photo_reference": {"file_id": "in-file"},
-        "check_out_photo_reference": {"file_id": "out-file"},
-        "check_out_time": datetime.now(timezone.utc),
+        "check_out_time": None,
+        "check_out_location": None,
+        "check_out_photo_reference": None,
+        "final_status": "PRESENT",
+        "unrelated": "preserved",
     }
     attendance = MemoryAttendance(record)
-    monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace(attendance=attendance, audit_logs=MemoryAudit()))
-    monkeypatch.setattr(attendance_api, "delete_photo", lambda reference: deleted.append(reference))
-    override_employee()
-    client = TestClient(app)
-    try:
-        response = client.delete("/api/attendance/mine/att-1?action=check_in")
-        assert response.status_code == 200
-        assert {"file_id": "in-file"} in deleted
-        assert {"file_id": "out-file"} in deleted
-        assert attendance.updated["check_in_photo_reference"] is None
-        assert attendance.updated["check_out_photo_reference"] is None
-    finally:
-        clear_overrides()
-
-
-def test_undo_check_out_deletes_checkout_photo(monkeypatch):
+    audit = MemoryAudit()
+    monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace(attendance=attendance, audit_logs=audit))
     deleted = []
-    record = {
-        "_id": "mongo-1",
-        "attendance_id": "att-1",
-        "employee_id": "EMP-1",
-        "date": "2026-09-24",
-        "check_in_photo_reference": {"file_id": "in-file"},
-        "check_out_photo_reference": {"file_id": "out-file"},
-        "check_out_time": datetime.now(timezone.utc),
-    }
-    attendance = MemoryAttendance(record)
-    monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace(attendance=attendance, audit_logs=MemoryAudit()))
-    monkeypatch.setattr(attendance_api, "delete_photo", lambda reference: deleted.append(reference))
-    override_employee()
-    client = TestClient(app)
-    try:
-        response = client.delete("/api/attendance/mine/att-1?action=check_out")
-        assert response.status_code == 200
-        assert deleted == [{"file_id": "out-file"}]
-        assert attendance.updated["check_out_photo_reference"] is None
-        assert attendance.record["check_in_photo_reference"]["file_id"] == "in-file"
-    finally:
-        clear_overrides()
-
-
-def test_admin_clear_deletes_photos(monkeypatch):
-    deleted = []
-    record = {
-        "_id": "mongo-1",
-        "attendance_id": "att-1",
-        "employee_id": "EMP-1",
-        "date": "2026-09-24",
-        "check_in_photo_reference": {"file_id": "in-file"},
-        "check_out_photo_reference": {"file_id": "out-file"},
-    }
-    attendance = MemoryAttendance(record)
-    monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace(attendance=attendance, audit_logs=MemoryAudit()))
     monkeypatch.setattr(attendance_api, "delete_photo", lambda reference: deleted.append(reference))
     override_admin()
     client = TestClient(app)
     try:
-        response = client.delete("/api/attendance/admin/att-1")
+        response = client.post("/api/attendance/admin/att-1/undo-check-in")
         assert response.status_code == 200
-        assert attendance.deleted is True
-        assert {"file_id": "in-file"} in deleted
-        assert {"file_id": "out-file"} in deleted
+        assert record["check_in_time"] is None
+        assert record["check_in_location"] is None
+        assert record["check_in_photo_reference"] is None
+        assert record["check_out_time"] is None
+        assert record["check_out_location"] is None
+        assert record["check_out_photo_reference"] is None
+        assert record["final_status"] == "ABSENT"
+        assert record["employee_id"] == "EMP-1"
+        assert record["date"] == "2026-09-24"
+        assert record["user_name"] == "Test Employee"
+        assert record["unrelated"] == "preserved"
+        assert deleted == []
+        assert audit.events[0]["event_type"] == "UNDO_CHECK_IN"
+        assert audit.events[0]["actor_id"] == "ADM-1"
+        assert audit.events[0]["metadata"] == {"attendance_id": "att-1", "employee_id": "EMP-1", "date": "2026-09-24"}
+        assert isinstance(audit.events[0]["created_at"], datetime)
+    finally:
+        clear_overrides()
+
+
+def test_admin_undo_check_in_is_blocked_if_checkout_exists(monkeypatch):
+    record = {
+        "_id": "mongo-1",
+        "attendance_id": "att-1",
+        "employee_id": "EMP-1",
+        "date": "2026-09-24",
+        "check_in_time": datetime.now(timezone.utc),
+        "check_in_location": {"latitude": 1.0, "longitude": 2.0},
+        "check_in_photo_reference": {"file_id": "in-file"},
+        "check_out_photo_reference": {"file_id": "out-file"},
+        "check_out_time": datetime.now(timezone.utc),
+        "check_out_location": {"latitude": 3.0, "longitude": 4.0},
+        "final_status": "PRESENT",
+    }
+    attendance = MemoryAttendance(record)
+    audit = MemoryAudit()
+    monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace(attendance=attendance, audit_logs=audit))
+    override_admin()
+    client = TestClient(app)
+    try:
+        response = client.post("/api/attendance/admin/att-1/undo-check-in")
+        assert response.status_code == 409
+        assert response.json()["detail"] == "Undo Check Out first before undoing Check In."
+        assert record["check_in_time"] is not None
+        assert record["check_out_time"] is not None
+        assert record["check_in_photo_reference"] == {"file_id": "in-file"}
+        assert record["check_out_photo_reference"] == {"file_id": "out-file"}
+        assert audit.events == []
+    finally:
+        clear_overrides()
+
+
+def test_admin_undo_check_out_removes_only_checkout_and_audits(monkeypatch):
+    record = {
+        "_id": "mongo-1",
+        "attendance_id": "att-1",
+        "employee_id": "EMP-1",
+        "date": "2026-09-24",
+        "check_in_time": datetime.now(timezone.utc),
+        "check_in_location": {"latitude": 1.0, "longitude": 2.0},
+        "check_in_photo_reference": {"file_id": "in-file"},
+        "check_out_photo_reference": {"file_id": "out-file"},
+        "check_out_time": datetime.now(timezone.utc),
+        "check_out_location": {"latitude": 3.0, "longitude": 4.0},
+        "final_status": "PRESENT",
+        "unrelated": "preserved",
+    }
+    attendance = MemoryAttendance(record)
+    audit = MemoryAudit()
+    monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace(attendance=attendance, audit_logs=audit))
+    deleted = []
+    monkeypatch.setattr(attendance_api, "delete_photo", lambda reference: deleted.append(reference))
+    override_admin()
+    client = TestClient(app)
+    try:
+        response = client.post("/api/attendance/admin/att-1/undo-check-out")
+        assert response.status_code == 200
+        assert record["check_out_time"] is None
+        assert record["check_out_location"] is None
+        assert record["check_out_photo_reference"] is None
+        assert record["check_in_time"] is not None
+        assert record["check_in_location"] == {"latitude": 1.0, "longitude": 2.0}
+        assert record["check_in_photo_reference"] == {"file_id": "in-file"}
+        assert record["final_status"] == "PRESENT"
+        assert record["unrelated"] == "preserved"
+        assert deleted == []
+        assert audit.events[0]["event_type"] == "UNDO_CHECK_OUT"
+        assert audit.events[0]["actor_id"] == "ADM-1"
+        assert audit.events[0]["metadata"]["employee_id"] == "EMP-1"
+        assert audit.events[0]["metadata"]["attendance_id"] == "att-1"
+        assert isinstance(audit.events[0]["created_at"], datetime)
+    finally:
+        clear_overrides()
+
+
+@pytest.mark.parametrize("action", ["undo-check-in", "undo-check-out"])
+def test_employee_cannot_call_admin_undo_operations(action, monkeypatch):
+    monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace())
+    override_employee()
+    client = TestClient(app)
+    try:
+        response = client.post(f"/api/attendance/admin/att-1/{action}")
+        assert response.status_code == 403
+    finally:
+        clear_overrides()
+
+
+def test_old_generic_employee_undo_endpoint_is_removed():
+    override_employee()
+    client = TestClient(app)
+    try:
+        assert client.delete("/api/attendance/mine/att-1?action=record").status_code == 404
     finally:
         clear_overrides()
 
@@ -505,7 +581,11 @@ def test_admin_dashboard_photo_viewer_is_in_react():
     source = (REPO_ROOT / "frontend" / "src" / "App.jsx").read_text(encoding="utf-8")
     assert "View Check-In Photo" in source
     assert "View Check-Out Photo" in source
-    assert "Photo expired or unavailable" in source
+    assert "Photo unavailable" in source
+    assert "Undo Check In" in source
+    assert "Undo Check Out" in source
+    assert "This will remove the employee's check-in time, location, and check-in photo reference." in source
+    assert "This will remove the employee's check-out time, location, and check-out photo reference." in source
     assert "function AdminPhotoModal" in source
     assert "function AdminDashboard" in source
 
@@ -531,28 +611,27 @@ def test_admin_can_retrieve_checkout_photo(monkeypatch):
         clear_overrides()
 
 
-def test_expired_photo_returns_unavailable(monkeypatch):
+def test_photo_retrieval_returns_unavailable_if_gridfs_file_is_missing(monkeypatch):
     monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace(attendance=SimpleNamespace(find_one=lambda query: {
         "attendance_id": "att-1",
         "check_in_photo_reference": {"file_id": str(ObjectId()), "content_type": "image/jpeg"},
     })))
 
-    def expired(_reference):
-        raise photo_service.PhotoExpiredError("Photo expired or unavailable")
+    def unavailable(_reference):
+        raise photo_service.PhotoUnavailableError("Photo unavailable")
 
-    monkeypatch.setattr(attendance_api, "open_photo", expired)
+    monkeypatch.setattr(attendance_api, "open_photo", unavailable)
     override_admin()
     client = TestClient(app)
     try:
         response = client.get("/api/attendance/admin/att-1/photo?event=check_in")
-        assert response.status_code == 410
-        assert "expired" in response.json()["detail"].lower()
-        assert "unavailable" in response.json()["detail"].lower()
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Photo unavailable"
     finally:
         clear_overrides()
 
 
-def test_public_attendance_hides_expired_photo_flag():
+def test_public_attendance_shows_old_referenced_photo_regardless_of_legacy_expiry():
     expired = datetime.now(timezone.utc) - timedelta(hours=1)
     record = public_attendance({
         "attendance_id": "attendance-1",
@@ -565,119 +644,45 @@ def test_public_attendance_hides_expired_photo_flag():
         "final_status": "PRESENT",
         "check_in_photo_reference": {"file_id": "secret-file-id", "content_type": "image/jpeg", "expires_at": expired},
     })
-    assert record["check_in_photo_available"] is False
+    assert record["check_in_photo_available"] is True
     assert record["check_in_time"] is not None
     assert record["employee_id"] == "EMP-1"
     assert "secret-file-id" not in str(record)
 
 
-def test_open_photo_rejects_expired_gridfs_metadata(monkeypatch):
+def test_open_photo_ignores_legacy_expiry_metadata(monkeypatch):
+    old_expiry = datetime.now(timezone.utc) - timedelta(days=1000)
+
     class Stream:
-        metadata = {"expires_at": datetime.now(timezone.utc) - timedelta(minutes=1)}
+        metadata = {"expires_at": old_expiry}
 
         def read(self):
             return b"jpeg-bytes"
 
     monkeypatch.setattr(photo_service, "GridFSBucket", lambda _db: SimpleNamespace(open_download_stream=lambda _id: Stream()))
     monkeypatch.setattr(photo_service, "get_db", lambda: object())
-    with pytest.raises(photo_service.PhotoExpiredError):
-        photo_service.open_photo({"file_id": str(ObjectId()), "content_type": "image/jpeg"})
+    stream = photo_service.open_photo({"file_id": str(ObjectId()), "content_type": "image/jpeg", "expires_at": old_expiry})
+    assert stream.read() == b"jpeg-bytes"
 
 
-def _expired_photo_store(now):
-    file_id = ObjectId()
-    files = [{"_id": file_id, "metadata": {"event": "check_in", "expires_at": now - timedelta(hours=1)}}]
-    chunks = [{"_id": ObjectId(), "files_id": file_id, "n": 0, "data": b"chunk"}]
-    attendance_docs = [{
-        "_id": ObjectId(),
-        "attendance_id": "att-keep",
-        "employee_id": "EMP-1",
-        "date": "2026-09-24",
-        "check_in_time": now - timedelta(hours=2),
-        "check_out_time": None,
-        "check_in_location": {"latitude": 12.9, "longitude": 77.6},
-        "check_out_location": None,
-        "final_status": "PRESENT",
-        "check_in_photo_reference": {"file_id": str(file_id), "content_type": "image/jpeg", "expires_at": now - timedelta(hours=1)},
-        "check_out_photo_reference": None,
-    }]
-    return file_id, files, chunks, attendance_docs
-
-
-def test_cleanup_deletes_expired_gridfs_files_and_chunks(monkeypatch):
-    now = datetime.now(timezone.utc)
-    file_id, files, chunks, attendance_docs = _expired_photo_store(now)
-
-    class Files:
-        def find(self, _query, _projection=None):
-            return list(files)
-
-        def find_one(self, query):
-            return next((item for item in files if item["_id"] == query.get("_id")), None)
-
-        def delete_one(self, query):
-            files[:] = [item for item in files if item["_id"] != query.get("_id")]
-
-    class Chunks:
-        def delete_many(self, query):
-            chunks[:] = [item for item in chunks if item["files_id"] != query.get("files_id")]
-
-    class Attendance:
-        def find(self, query, _projection=None):
-            field = next(key for key in query if key.endswith("_photo_reference"))
-            return [item for item in attendance_docs if item.get(field)]
-
-        def update_one(self, query, update):
-            for item in attendance_docs:
-                if item["_id"] == query.get("_id"):
-                    item.update(update["$set"])
+@pytest.mark.parametrize("event", ["check_in", "check_out"])
+def test_new_attendance_photo_uploads_never_receive_expiry(monkeypatch, event):
+    uploads = []
 
     class FakeBucket:
-        def delete(self, target_id):
-            files[:] = [item for item in files if item["_id"] != target_id]
-            chunks[:] = [item for item in chunks if item["files_id"] != target_id]
+        def upload_from_stream(self, _filename, _stream, metadata=None):
+            uploads.append(metadata)
+            return ObjectId()
 
-    monkeypatch.setattr(photo_service, "get_db", lambda: SimpleNamespace(
-        fs=SimpleNamespace(files=Files(), chunks=Chunks()),
-        attendance=Attendance(),
-    ))
     monkeypatch.setattr(photo_service, "GridFSBucket", lambda _db: FakeBucket())
-
-    first = photo_service.cleanup_expired_photos()
-    assert first["deleted_files"] == 1
-    assert first["cleared_references"] == 1
-    assert files == []
-    assert chunks == []
-    assert attendance_docs[0]["check_in_photo_reference"] is None
-    assert attendance_docs[0]["check_in_time"] is not None
-    assert attendance_docs[0]["employee_id"] == "EMP-1"
-    assert attendance_docs[0]["date"] == "2026-09-24"
-    assert attendance_docs[0]["final_status"] == "PRESENT"
-
-    second = photo_service.cleanup_expired_photos()
-    assert second["deleted_files"] == 0
-    assert second["cleared_references"] == 0
+    monkeypatch.setattr(photo_service, "get_db", lambda: object())
+    reference = photo_service.store_photo(b"jpeg", "image/jpeg", "EMP-1", "att-1", event)
+    assert "expires_at" not in uploads[0]
+    assert "expires_at" not in reference
 
 
-def test_cleanup_endpoint_requires_protection(monkeypatch):
-    monkeypatch.setattr("app.api.admin.get_settings", lambda: SimpleNamespace(photo_cleanup_secret="cleanup-secret"))
-    monkeypatch.setattr("app.api.admin.cleanup_expired_photos", lambda: {"deleted_files": 0, "cleared_references": 0})
+def test_attendance_photo_cleanup_job_and_endpoint_are_removed():
+    assert not hasattr(photo_service, "cleanup_expired_photos")
     client = TestClient(app)
-    denied = client.post("/api/admin/photos/cleanup")
-    assert denied.status_code == 403
-    allowed = client.post("/api/admin/photos/cleanup", headers={"X-Photo-Cleanup-Secret": "cleanup-secret"})
-    assert allowed.status_code == 200
-    assert allowed.json()["deleted_files"] == 0
-    allowed_get = client.get("/api/admin/photos/cleanup", headers={"X-Photo-Cleanup-Secret": "cleanup-secret"})
-    assert allowed_get.status_code == 200
-
-
-def test_employee_cannot_run_photo_cleanup(monkeypatch):
-    monkeypatch.setattr("app.api.admin.get_settings", lambda: SimpleNamespace(photo_cleanup_secret="cleanup-secret"))
-    override_employee()
-    client = TestClient(app)
-    try:
-        response = client.post("/api/admin/photos/cleanup")
-        assert response.status_code == 403
-    finally:
-        clear_overrides()
+    assert client.get("/api/admin/photos/cleanup").status_code == 404
+    assert client.post("/api/admin/photos/cleanup").status_code == 404
