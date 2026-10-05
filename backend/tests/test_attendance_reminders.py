@@ -74,6 +74,7 @@ def make_employee(**overrides):
         "employee_id": "EMP-1",
         "full_name": "Test Employee",
         "email": "login@example.com",
+        "role": "employee",
         "recovery_email": "verified@example.net",
         "recovery_email_verified": True,
         "is_active": True,
@@ -98,6 +99,30 @@ def test_employee_without_check_in_receives_check_in_reminder():
 
     assert result == {"success": True, "eligible": 1, "sent": 1, "skipped": 0, "failed": 0}
     assert email.sent == [("verified@example.net", "Test Employee", "check_in")]
+
+
+def test_admin_without_check_in_does_not_receive_check_in_reminder():
+    db = make_db([make_employee(employee_id="ADM-001", role="admin")])
+    email = MockEmailProvider()
+
+    result = run_attendance_reminder("check_in", db=db, email_provider=email)
+
+    assert result["eligible"] == 0
+    assert email.sent == []
+
+
+def test_admin_checked_in_without_check_out_does_not_receive_check_out_reminder():
+    now = datetime(2026, 10, 1, 8, tzinfo=timezone.utc)
+    db = make_db(
+        [make_employee(employee_id="ADM-002", role="admin")],
+        [{"employee_id": "ADM-002", "date": "2026-10-01", "check_in_time": now, "check_out_time": None}],
+    )
+    email = MockEmailProvider()
+
+    result = run_attendance_reminder("check_out", db=db, email_provider=email, now=now)
+
+    assert result["eligible"] == 0
+    assert email.sent == []
 
 
 def test_employee_who_checked_in_does_not_receive_check_in_reminder():

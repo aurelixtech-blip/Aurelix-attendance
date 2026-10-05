@@ -65,7 +65,7 @@ def run_attendance_reminder(reminder_type: str, db=None, email_provider=None, no
     today = current_time.astimezone(KOLKATA_TIME_ZONE).date().isoformat()
     summary = {"success": True, "eligible": 0, "sent": 0, "skipped": 0, "failed": 0}
 
-    for employee in db.employees.find({"is_active": True}):
+    for employee in db.employees.find({"role": "employee", "is_active": True}):
         recovery_email = _usable_recovery_email(employee)
         if not recovery_email:
             continue
