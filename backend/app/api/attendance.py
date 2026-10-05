@@ -67,9 +67,12 @@ def mine(employee: dict = Depends(current_employee)):
         records.append(public_attendance(item))
     return records
 
-def _undo_attendance_event(attendance_id: str, event: str, claims: dict) -> dict:
+def _undo_attendance_event(attendance_id: str, event: str, claims: dict, employee_id: str | None = None) -> dict:
     db = get_db()
-    record = db.attendance.find_one({"attendance_id": attendance_id})
+    record_query = {"attendance_id": attendance_id}
+    if employee_id is not None:
+        record_query["employee_id"] = employee_id
+    record = db.attendance.find_one(record_query)
     if not record:
         raise HTTPException(status_code=404, detail="Attendance record not found")
 
@@ -103,7 +106,10 @@ def _undo_attendance_event(attendance_id: str, event: str, claims: dict) -> dict
         guard = {"check_out_time": {"$ne": None}, "check_in_time": {"$ne": None}}
         event_type = "UNDO_CHECK_OUT"
 
-    result = db.attendance.update_one({"_id": record["_id"], **guard}, {"$set": changes})
+    update_query = {"_id": record["_id"], **guard}
+    if employee_id is not None:
+        update_query["employee_id"] = employee_id
+    result = db.attendance.update_one(update_query, {"$set": changes})
     if result.matched_count != 1:
         raise HTTPException(status_code=409, detail="Attendance changed while the undo was being applied. Refresh and try again.")
 
@@ -116,6 +122,24 @@ def _undo_attendance_event(attendance_id: str, event: str, claims: dict) -> dict
         )
     )
     return {"message": f"Undo {event.replace('_', ' ').title()} completed", "attendance_id": attendance_id, "action": event}
+
+
+def _undo_own_attendance_event(attendance_id: str, event: str, employee: dict) -> dict:
+    if employee.get("role") != "employee":
+        raise HTTPException(status_code=403, detail="Employee access required")
+    employee_id = employee["employee_id"]
+    return _undo_attendance_event(attendance_id, event, {"sub": employee_id}, employee_id=employee_id)
+
+
+@router.post("/mine/{attendance_id}/undo-check-in")
+def undo_my_check_in(attendance_id: str, employee: dict = Depends(current_employee)):
+    return _undo_own_attendance_event(attendance_id, "check_in", employee)
+
+
+@router.post("/mine/{attendance_id}/undo-check-out")
+def undo_my_check_out(attendance_id: str, employee: dict = Depends(current_employee)):
+    return _undo_own_attendance_event(attendance_id, "check_out", employee)
+
 
 @router.get("/admin")
 def all_attendance(_claims: dict = Depends(require_admin), date: str | None = Query(default=None), employee_id: str | None = Query(default=None), status: str | None = Query(default=None)):

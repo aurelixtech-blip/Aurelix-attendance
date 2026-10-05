@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import { ArrowLeft, ArrowRight, BarChart3, CalendarDays, Check, ClipboardList, Download, LogOut, MapPin, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react'
 import api from './services/api'
 import LocationAttendance from './LocationAttendance'
+import EmployeeAttendanceHistory from './EmployeeAttendanceHistory'
 import { formatIndiaDate, formatKolkataTime, kolkataDateKey, parseIndiaDate } from './time'
 
 function formatLocation(location) {
@@ -491,13 +492,6 @@ function EmployeeEditor({ user, onLogout }) {
   return <div className="admin-people-grid"><CreateEmployeePanel onCreated={load}/><section className="panel"><span className="eyebrow">PEOPLE / DIRECTORY</span><h2>Members and admins</h2><div className="people-list">{employees.map(item => <button type="button" className={item.employee_id === selectedId ? 'person-row selected-person' : 'person-row'} onClick={() => selectEmployee(item.employee_id)} key={item.employee_id}><span><b>{item.full_name}</b><small>{item.employee_id} - {item.department} - {item.role}</small></span><span className="muted">Edit</span></button>)}</div></section><section className="panel">{form ? <><span className="eyebrow">PEOPLE / EDIT RECORD</span><h2>Edit person details</h2><form className="employee-form" onSubmit={save}>{[['employee_id','Employee ID'],['full_name','Full name'],['email','Login Email'],['department','Department'],['password','New password']].map(([key, label]) => <label key={key}>{label}<input type={key === 'email' ? 'email' : key === 'password' ? 'password' : 'text'} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })}/></label>)}<label>Recovery Email<input type="email" autoComplete="email" value={form.recovery_email || ''} onChange={event => setForm({ ...form, recovery_email: event.target.value })}/>{form.recovery_email && <small>{form.recovery_email_verified ? 'Verified' : 'Not verified'}</small>}</label><label>Role<select required value={form.employee_id === 'ADM-001' ? 'admin' : form.role} disabled={form.employee_id === 'ADM-001'} onChange={event => setForm({ ...form, role: event.target.value })}><option value="employee">Employee</option><option value="admin">Admin</option></select></label><button className="primary-button" type="submit">Save changes</button>{!isCurrentUser && form.employee_id !== 'ADM-001' && <button className="ghost-button" type="button" onClick={remove}><Trash2 size={16}/> Remove {form.role === 'admin' ? 'admin' : 'employee'}</button>}</form>{message && <div className="success-box"><Check size={17}/>{message}</div>}{verification && <RecoveryEmailVerificationPanel challenge={verification} onVerified={verificationMessage => { setVerification(null); setForm(current => ({ ...current, recovery_email_verified: true })); setMessage(verificationMessage); load() }}/>}</> : <><span className="eyebrow">PEOPLE / EDIT RECORD</span><h2>Select a person</h2><p className="muted">Choose a person from the directory to edit their details.</p></>}</section></div>
 }
 
-function History() {
-  const [items, setItems] = useState([])
-  async function load() { const { data } = await api.get('/api/attendance/mine'); setItems(data) }
-  useEffect(() => { load().catch(() => {}) }, [])
-  return <section className="panel table-panel"><span className="eyebrow">MY ATTENDANCE</span><h2>Attendance history</h2><div className="table-scroll"><table><thead><tr><th>Date</th><th>Check in</th><th>Check-in location</th><th>Check out</th><th>Check-out location</th><th>Status</th></tr></thead><tbody>{items.map(item => <tr key={item.attendance_id}><td><b>{formatIndiaDate(item.date)}</b></td><td>{item.check_in_time ? `${formatKolkataTime(item.check_in_time)} IST` : '-'}</td><td>{formatLocation(item.check_in_location)}</td><td>{item.check_out_time ? `${formatKolkataTime(item.check_out_time)} IST` : 'Open'}</td><td>{formatLocation(item.check_out_location)}</td><td><span className={statusBadgeClass(item.final_status)}>{item.final_status}</span></td></tr>)}</tbody></table></div></section>
-}
-
 export default function App() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -505,5 +499,5 @@ export default function App() {
   if (loading) return <div className="loading">Loading secure workspace...</div>
   if (!user) return <Routes><Route path="*" element={<Login onLogin={setUser}/>}/></Routes>
   const logout = () => { localStorage.removeItem('aurelix_token'); setUser(null) }
-  return <Shell user={user} onLogout={logout}><Routes><Route path="/" element={<Navigate to={user.role === 'admin' ? '/admin' : '/attendance'} replace/>}/><Route path="/attendance" element={<LocationAttendance/>}/><Route path="/history" element={<History/>}/><Route path="/admin" element={user.role === 'admin' ? <AdminDashboard/> : <Navigate to="/attendance"/>}/><Route path="/admin/employees" element={user.role === 'admin' ? <EmployeeEditor user={user} onLogout={logout}/> : <Navigate to="/attendance"/>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></Shell>
+  return <Shell user={user} onLogout={logout}><Routes><Route path="/" element={<Navigate to={user.role === 'admin' ? '/admin' : '/attendance'} replace/>}/><Route path="/attendance" element={<LocationAttendance/>}/><Route path="/history" element={<EmployeeAttendanceHistory/>}/><Route path="/admin" element={user.role === 'admin' ? <AdminDashboard/> : <Navigate to="/attendance"/>}/><Route path="/admin/employees" element={user.role === 'admin' ? <EmployeeEditor user={user} onLogout={logout}/> : <Navigate to="/attendance"/>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></Shell>
 }

@@ -529,6 +529,152 @@ def test_admin_undo_check_out_removes_only_checkout_and_audits(monkeypatch):
         clear_overrides()
 
 
+def test_employee_can_undo_own_check_out_and_preserves_check_in(monkeypatch):
+    check_in_time = datetime.now(timezone.utc)
+    record = {
+        "_id": "mongo-1",
+        "attendance_id": "att-1",
+        "employee_id": "EMP-1",
+        "date": "2026-09-24",
+        "check_in_time": check_in_time,
+        "check_in_location": {"latitude": 1.0, "longitude": 2.0},
+        "check_in_photo_reference": {"file_id": "in-file"},
+        "check_out_time": datetime.now(timezone.utc),
+        "check_out_location": {"latitude": 3.0, "longitude": 4.0},
+        "check_out_photo_reference": {"file_id": "out-file"},
+        "final_status": "PRESENT",
+    }
+    attendance = MemoryAttendance(record)
+    audit = MemoryAudit()
+    monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace(attendance=attendance, audit_logs=audit))
+    override_employee()
+    client = TestClient(app)
+    try:
+        response = client.post("/api/attendance/mine/att-1/undo-check-out")
+
+        assert response.status_code == 200
+        assert record["check_out_time"] is None
+        assert record["check_out_location"] is None
+        assert record["check_out_photo_reference"] is None
+        assert record["check_in_time"] == check_in_time
+        assert record["check_in_location"] == {"latitude": 1.0, "longitude": 2.0}
+        assert record["check_in_photo_reference"] == {"file_id": "in-file"}
+        assert record["final_status"] == "PRESENT"
+        assert audit.events[0]["event_type"] == "UNDO_CHECK_OUT"
+        assert audit.events[0]["actor_id"] == "EMP-1"
+        assert audit.events[0]["metadata"] == {"attendance_id": "att-1", "employee_id": "EMP-1", "date": "2026-09-24"}
+        assert isinstance(audit.events[0]["created_at"], datetime)
+    finally:
+        clear_overrides()
+
+
+def test_employee_can_undo_own_check_in_after_undoing_checkout(monkeypatch):
+    record = {
+        "_id": "mongo-1",
+        "attendance_id": "att-1",
+        "employee_id": "EMP-1",
+        "date": "2026-09-24",
+        "check_in_time": datetime.now(timezone.utc),
+        "check_in_location": {"latitude": 1.0, "longitude": 2.0},
+        "check_in_photo_reference": {"file_id": "in-file"},
+        "check_out_time": datetime.now(timezone.utc),
+        "check_out_location": {"latitude": 3.0, "longitude": 4.0},
+        "check_out_photo_reference": {"file_id": "out-file"},
+        "final_status": "PRESENT",
+    }
+    attendance = MemoryAttendance(record)
+    audit = MemoryAudit()
+    monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace(attendance=attendance, audit_logs=audit))
+    override_employee()
+    client = TestClient(app)
+    try:
+        check_out_response = client.post("/api/attendance/mine/att-1/undo-check-out")
+        assert check_out_response.status_code == 200
+
+        response = client.post("/api/attendance/mine/att-1/undo-check-in")
+
+        assert response.status_code == 200
+        assert record["check_in_time"] is None
+        assert record["check_in_location"] is None
+        assert record["check_in_photo_reference"] is None
+        assert record["check_out_time"] is None
+        assert record["check_out_location"] is None
+        assert record["check_out_photo_reference"] is None
+        assert record["final_status"] == "ABSENT"
+        assert [event["event_type"] for event in audit.events] == ["UNDO_CHECK_OUT", "UNDO_CHECK_IN"]
+        assert all(event["actor_id"] == "EMP-1" for event in audit.events)
+        assert all(event["metadata"] == {"attendance_id": "att-1", "employee_id": "EMP-1", "date": "2026-09-24"} for event in audit.events)
+        assert all(isinstance(event["created_at"], datetime) for event in audit.events)
+    finally:
+        clear_overrides()
+
+
+def test_employee_cannot_undo_check_in_while_checkout_exists(monkeypatch):
+    record = {
+        "_id": "mongo-1",
+        "attendance_id": "att-1",
+        "employee_id": "EMP-1",
+        "date": "2026-09-24",
+        "check_in_time": datetime.now(timezone.utc),
+        "check_out_time": datetime.now(timezone.utc),
+        "check_in_photo_reference": {"file_id": "in-file"},
+        "check_out_photo_reference": {"file_id": "out-file"},
+        "final_status": "PRESENT",
+    }
+    attendance = MemoryAttendance(record)
+    audit = MemoryAudit()
+    monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace(attendance=attendance, audit_logs=audit))
+    override_employee()
+    client = TestClient(app)
+    try:
+        response = client.post("/api/attendance/mine/att-1/undo-check-in")
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "Undo Check Out first before undoing Check In."
+        assert record["check_in_time"] is not None
+        assert record["check_out_time"] is not None
+        assert audit.events == []
+    finally:
+        clear_overrides()
+
+
+def test_employee_cannot_undo_another_employees_attendance(monkeypatch):
+    record = {
+        "_id": "mongo-1",
+        "attendance_id": "att-other",
+        "employee_id": "EMP-2",
+        "date": "2026-09-24",
+        "check_in_time": datetime.now(timezone.utc),
+        "check_out_time": datetime.now(timezone.utc),
+        "final_status": "PRESENT",
+    }
+    attendance = MemoryAttendance(record)
+    audit = MemoryAudit()
+    monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace(attendance=attendance, audit_logs=audit))
+    override_employee()
+    client = TestClient(app)
+    try:
+        response = client.post("/api/attendance/mine/att-other/undo-check-out")
+
+        assert response.status_code == 404
+        assert record["check_out_time"] is not None
+        assert audit.events == []
+    finally:
+        clear_overrides()
+
+
+@pytest.mark.parametrize("action", ["undo-check-in", "undo-check-out"])
+def test_admin_cannot_use_employee_self_undo_routes(action, monkeypatch):
+    monkeypatch.setattr(attendance_api, "get_db", lambda: pytest.fail("A non-employee must be rejected before attendance lookup"))
+    app.dependency_overrides[current_employee] = lambda: {"employee_id": "ADM-1", "role": "admin", "is_active": True}
+    client = TestClient(app)
+    try:
+        response = client.post(f"/api/attendance/mine/att-1/{action}")
+        assert response.status_code == 403
+    finally:
+        clear_overrides()
+
+
 @pytest.mark.parametrize("action", ["undo-check-in", "undo-check-out"])
 def test_employee_cannot_call_admin_undo_operations(action, monkeypatch):
     monkeypatch.setattr(attendance_api, "get_db", lambda: SimpleNamespace())
