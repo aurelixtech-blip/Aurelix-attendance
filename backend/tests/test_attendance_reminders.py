@@ -282,6 +282,52 @@ def test_unauthorized_cron_requests_are_rejected(monkeypatch):
     assert check_out.status_code == 401
 
 
+@pytest.mark.parametrize("endpoint", [
+    "/api/cron/attendance-reminders/check-in",
+    "/api/cron/attendance-reminders/check-out",
+])
+def test_cron_endpoint_accepts_x_cron_secret(monkeypatch, endpoint):
+    monkeypatch.setattr(reminder_api, "get_settings", lambda: SimpleNamespace(cron_secret="test-cron-secret"))
+    monkeypatch.setattr(reminder_api, "run_attendance_reminder", lambda _reminder_type: {"success": True})
+    response = TestClient(app).post(endpoint, headers={"X-Cron-Secret": "test-cron-secret"})
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("endpoint", [
+    "/api/cron/attendance-reminders/check-in",
+    "/api/cron/attendance-reminders/check-out",
+])
+def test_cron_endpoint_rejects_invalid_x_cron_secret(monkeypatch, endpoint):
+    monkeypatch.setattr(reminder_api, "get_settings", lambda: SimpleNamespace(cron_secret="test-cron-secret"))
+    response = TestClient(app).post(endpoint, headers={"X-Cron-Secret": "incorrect-secret"})
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("endpoint", [
+    "/api/cron/attendance-reminders/check-in",
+    "/api/cron/attendance-reminders/check-out",
+])
+def test_cron_endpoint_rejects_missing_x_cron_secret(monkeypatch, endpoint):
+    monkeypatch.setattr(reminder_api, "get_settings", lambda: SimpleNamespace(cron_secret="test-cron-secret"))
+    response = TestClient(app).post(endpoint)
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("endpoint", [
+    "/api/cron/attendance-reminders/check-in",
+    "/api/cron/attendance-reminders/check-out",
+])
+def test_cron_endpoint_still_accepts_bearer_secret(monkeypatch, endpoint):
+    monkeypatch.setattr(reminder_api, "get_settings", lambda: SimpleNamespace(cron_secret="test-cron-secret"))
+    monkeypatch.setattr(reminder_api, "run_attendance_reminder", lambda _reminder_type: {"success": True})
+    response = TestClient(app).post(endpoint, headers={"Authorization": "Bearer test-cron-secret"})
+
+    assert response.status_code == 200
+
+
 def test_check_in_reminder_does_not_modify_attendance():
     attendance = [{"employee_id": "EMP-1", "date": "2026-10-01", "check_in_time": None, "check_out_time": None, "final_status": "PENDING"}]
     original = deepcopy(attendance)

@@ -13,9 +13,11 @@ development_router = APIRouter(prefix="/api/development/attendance-reminders", t
 
 def _authorize_cron(request: Request) -> None:
     secret = get_settings().cron_secret
+    cron_secret = request.headers.get("x-cron-secret", "")
     authorization = request.headers.get("authorization", "")
-    expected = f"Bearer {secret}" if secret else ""
-    if not secret or not hmac.compare_digest(authorization, expected):
+    valid_cron_secret = bool(secret) and hmac.compare_digest(cron_secret, secret)
+    valid_bearer_secret = bool(secret) and hmac.compare_digest(authorization, f"Bearer {secret}")
+    if not valid_cron_secret and not valid_bearer_secret:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
