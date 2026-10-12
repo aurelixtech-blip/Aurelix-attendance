@@ -14,7 +14,7 @@ function formatLocation(location) {
 }
 
 function Logo({ className = 'brand-logo' }) {
-  return <img className={className} src="/aurelix-logo.png" alt="Aurelix" />
+  return <img className={className} src="/aurelix-logo.png" alt="Aurelix" draggable={false} onContextMenu={event => event.preventDefault()} />
 }
 
 function statusBadgeClass(status) {
@@ -356,7 +356,7 @@ function AdminDashboard() {
     const days = new Date(year, monthNumber, 0).getDate()
     const offset = new Date(year, monthNumber - 1, 1).getDay()
     const summaries = monthRecords.reduce((result, item) => ({ ...result, [item.date]: (result[item.date] || 0) + (item.final_status === 'PRESENT' ? 1 : 0) }), {})
-    return [...Array(offset).fill(null).map((_, index) => <span className="calendar-day empty" key={`empty-${index}`} />), ...Array.from({ length: days }, (_, index) => { const date = `${month}-${String(index + 1).padStart(2, '0')}`; return <button type="button" className={date === selectedDate ? 'calendar-day selected' : 'calendar-day'} onClick={() => chooseDate(date)} key={date}><b>{index + 1}</b>{summaries[date] ? <small>{summaries[date]} present</small> : <small>-</small>}</button> })]
+    return [...Array(offset).fill(null).map((_, index) => <span className="calendar-day empty" key={`empty-${index}`} />), ...Array.from({ length: days }, (_, index) => { const date = `${month}-${String(index + 1).padStart(2, '0')}`; const presentCount = summaries[date] || 0; return <button type="button" className={date === selectedDate ? 'calendar-day selected' : 'calendar-day'} onClick={() => chooseDate(date)} key={date}><b>{index + 1}</b><small aria-label={presentCount ? `${presentCount} present` : 'No attendance'}>{presentCount || '-'}</small></button> })]
   }
   async function exportData(criteria) {
     const details = exportDetails(criteria)
