@@ -29,6 +29,5 @@ def init_indexes() -> None:
         [("employee_id", ASCENDING), ("date", ASCENDING), ("reminder_type", ASCENDING)],
         unique=True,
     )
-    db.employee_comments.create_index([("submitted_at", DESCENDING)])
     db.audit_logs.create_index([("created_at", DESCENDING)])
     db.fs.files.create_index("metadata.event")

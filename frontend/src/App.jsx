@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, BarChart3, CalendarDays, Check, ClipboardList, Download, LogOut, MapPin, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BarChart3, CalendarDays, Check, ClipboardList, Download, Eye, EyeOff, LogOut, MapPin, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react'
 import api from './services/api'
 import LocationAttendance from './LocationAttendance'
 import EmployeeAttendanceHistory from './EmployeeAttendanceHistory'
-import { AdminPrivateComments } from './PrivateComments'
 import { formatIndiaDate, formatKolkataTime, kolkataDateKey, parseIndiaDate } from './time'
 
 function formatLocation(location) {
@@ -99,8 +98,9 @@ function Shell({ user, onLogout, children }) {
   return <div className="app-shell"><aside className="sidebar"><div className="brand"><Logo /></div><div className="workspace-label">Workspace / {isAdmin ? 'Operations' : 'Employee'}</div><nav>{links.map(([path, Icon, label]) => <button className={location.pathname === path ? 'nav-item active' : 'nav-item'} onClick={() => navigate(path)} key={path}><Icon size={17}/>{label}</button>)}</nav><div className="sidebar-bottom"><div className="user-chip"><span className="avatar">{user.full_name?.slice(0, 1)}</span><span><b>{user.full_name}</b><small>{user.department}</small></span></div><button className="nav-item" onClick={onLogout}><LogOut size={17}/>Sign out</button></div></aside><main className="main-content"><header className="topbar"><div><span className="eyebrow">AURELIX / {isAdmin ? 'OPERATIONS' : 'PERSONAL SPACE'}</span><h1>{isAdmin ? 'Attendance command center' : 'Good to see you, ' + user.full_name.split(' ')[0]}</h1></div><span className="secure-pill"><ShieldCheck size={14}/> Secure session</span></header>{children}</main></div>
 }
 
-function Login({ onLogin }) {
+export function Login({ onLogin }) {
   const [form, setForm] = useState({ email: '', password: '' })
+  const [passwordVisible, setPasswordVisible] = useState(false)
   const [screen, setScreen] = useState('login')
   const [recovery, setRecovery] = useState({ recovery_email: '', otp: '', challengeToken: '', resetToken: '', maskedEmail: '' })
   const [error, setError] = useState('')
@@ -112,6 +112,7 @@ function Login({ onLogin }) {
     setScreen('login')
     setError('')
     setMessage('')
+    setPasswordVisible(false)
     setForm(current => ({ ...current, password: '' }))
   }
 
@@ -189,7 +190,7 @@ function Login({ onLogin }) {
   }
 
   return <div className="login-page"><div className="login-visual"><div className="brand"><Logo /></div><div className="visual-copy"><span className="eyebrow cyan">ATTENDANCE / TIME / PLACE</span><h1>Aurelix Attendance System</h1><p>Check in and check out with a secure account, server time, and a one-time location capture.</p></div><div className="signal-grid"><span><b>01</b> SECURE LOGIN</span><span><b>02</b> SERVER TIME</span><span><b>03</b> LOCATION STORED</span></div></div>
-    {screen === 'login' && <form className="login-card" onSubmit={submitLogin}><span className="eyebrow">WELCOME BACK</span><h2>Sign in to your workspace</h2><p className="muted">Use your Aurelix credentials to continue.</p><label>Work email<input type="email" required value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} placeholder="you@aurelix.com" disabled={busy} /></label><label>Password<input type="password" required value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} placeholder="Password" disabled={busy} /></label>{error && <><div className="error-box"><X size={16}/>{error}</div><button className="login-link" type="button" onClick={() => { setError(''); setScreen('request') }}>Forgot password?</button></>}<button className="primary-button" type="submit" disabled={busy}>{busy ? 'Signing in...' : <>Enter workspace <ArrowRight size={17}/></>}</button><small className="form-note">Protected by JWT authentication and role-based access.</small></form>}
+    {screen === 'login' && <form className="login-card" onSubmit={submitLogin}><span className="eyebrow">WELCOME BACK</span><h2>Sign in to your workspace</h2><p className="muted">Use your Aurelix credentials to continue.</p><label>Work email<input type="email" required value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} placeholder="you@aurelix.com" disabled={busy} /></label><label>Password<span className="password-input-wrap"><input className="password-input" type={passwordVisible ? 'text' : 'password'} required value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} placeholder="Password" disabled={busy} /><button className="password-visibility-toggle" type="button" aria-label={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} onClick={() => setPasswordVisible(visible => !visible)} disabled={busy}>{passwordVisible ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}</button></span></label>{error && <><div className="error-box"><X size={16}/>{error}</div><button className="login-link" type="button" onClick={() => { setError(''); setScreen('request') }}>Forgot password?</button></>}<button className="primary-button" type="submit" disabled={busy}>{busy ? 'Signing in...' : <>Enter workspace <ArrowRight size={17}/></>}</button><small className="form-note">Protected by JWT authentication and role-based access.</small></form>}
     {screen === 'request' && <form className="login-card recovery-card" onSubmit={sendOtp}><span className="eyebrow">ACCOUNT RECOVERY</span><h2>Forgot Password</h2><label>Recovery Email<input type="email" required autoComplete="email" value={recovery.recovery_email} onChange={event => setRecovery({ ...recovery, recovery_email: event.target.value })} disabled={busy}/></label>{error && <div className="error-box"><X size={16}/>{error}</div>}<button className="primary-button" type="submit" disabled={busy}>{busy ? 'Sending...' : 'Send OTP'}</button><button className="login-link" type="button" onClick={backToLogin} disabled={busy}>Back to Login</button></form>}
     {screen === 'verify' && <form className="login-card recovery-card" onSubmit={verifyOtp}><span className="eyebrow">ACCOUNT RECOVERY</span><h2>OTP Verification</h2><p className="muted">Verification code sent to</p><p className="recovery-destination">{recovery.maskedEmail}</p>{message && <div className="success-box"><Check size={16}/>{message}</div>}<label>OTP<input type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={recovery.otp} onChange={event => setRecovery({ ...recovery, otp: event.target.value.replace(/\D/g, '').slice(0, 6) })} disabled={busy}/></label>{error && <div className="error-box"><X size={16}/>{error}</div>}<button className="primary-button" type="submit" disabled={busy || recovery.otp.length !== 6}>{busy ? 'Verifying...' : 'Verify OTP'}</button><button className="login-link" type="button" onClick={sendOtp} disabled={busy}>Resend OTP</button><button className="login-link" type="button" onClick={backToLogin} disabled={busy}>Back to Login</button></form>}
     {screen === 'reset' && <form className="login-card recovery-card" onSubmit={resetPassword}><span className="eyebrow">ACCOUNT RECOVERY</span><h2>Create New Password</h2><label>New Password<input type="password" name="new_password" minLength={8} maxLength={128} autoComplete="new-password" required disabled={busy}/></label><label>Confirm New Password<input type="password" name="confirm_password" minLength={8} maxLength={128} autoComplete="new-password" required disabled={busy}/></label>{error && <div className="error-box"><X size={16}/>{error}</div>}<button className="primary-button" type="submit" disabled={busy}>{busy ? 'Resetting...' : 'Reset Password'}</button><button className="login-link" type="button" onClick={backToLogin} disabled={busy}>Back to Login</button></form>}
@@ -394,7 +395,128 @@ function AdminDashboard() {
     if (!record[`${event}_photo_available`]) return <span className="muted">-</span>
     return <button className="ghost-button table-action" type="button" onClick={() => openPhoto(record, event)}>{event === 'check_in' ? 'View Check-In Photo' : 'View Check-Out Photo'}</button>
   }
-  return <><section className="hero-strip compact"><div><span className="eyebrow cyan">LIVE OPERATIONS / OVERVIEW</span><h2>Attendance register</h2><p>Review employee attendance by day and export the stored check-in/check-out records.</p></div><label className="date-picker">Selected day<IndiaDateInput value={selectedDate} onChange={chooseDate} /></label></section><div className="stats-grid">{[['TOTAL EMPLOYEES', stats.total_employees, Users], ['PRESENT', stats.present_today, Check], ['ABSENT', stats.absent_today, X]].map(([label, value, Icon]) => <div className="stat-card" key={label}><Icon size={17}/><span>{label}</span><strong>{value ?? '-'}</strong></div>)}</div><div className="admin-dashboard-grid"><section className="panel calendar-panel"><div className="panel-heading"><div><span className="eyebrow">ATTENDANCE CALENDAR</span><h3>{new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h3></div><div className="calendar-actions"><button className="icon-button" title="Previous month" onClick={() => shiftMonth(-1)}><ArrowLeft size={16}/></button><button className="icon-button" title="Next month" onClick={() => shiftMonth(1)}><ArrowRight size={16}/></button></div></div><div className="calendar-weekdays">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => <span key={day}>{day}</span>)}</div><div className="calendar-grid">{renderCalendar()}</div></section><section className="panel table-panel"><div className="panel-heading"><div><span className="eyebrow">ATTENDANCE LOG / {formatIndiaDate(selectedDate)}</span><h3>Daily Attendance Register</h3></div><button className="ghost-button" type="button" onClick={() => { setExportError(''); setExportDialogOpen(true) }}><Download size={16}/>Export data</button></div><div className="table-scroll"><table><thead><tr><th>Employee</th><th>Department</th><th>In</th><th>In location</th><th>Check-in Photo</th><th>Out</th><th>Out location</th><th>Check-out Photo</th><th>Status</th><th>Undo Events</th></tr></thead><tbody>{records.map(item => <tr key={item.attendance_id}><td><b>{item.employee?.full_name || item.user_name || item.employee_id}</b><small>{item.employee_id}</small></td><td>{item.employee?.department || '-'}</td><td>{item.check_in_time ? `${formatKolkataTime(item.check_in_time)} IST` : '-'}</td><td>{formatLocation(item.check_in_location)}</td><td>{photoCell(item, 'check_in')}</td><td>{item.check_out_time ? `${formatKolkataTime(item.check_out_time)} IST` : 'Open'}</td><td>{formatLocation(item.check_out_location)}</td><td>{photoCell(item, 'check_out')}</td><td><span className={item.final_status === 'PRESENT' ? 'badge verified' : 'badge absent'}>{item.final_status}</span></td><td><div className="attendance-undo-actions">{item.check_in_time && <button className="ghost-button table-action undo-check-in" type="button" onClick={() => { setUndoError(''); setUndoConfirmation({ record: item, event: 'check_in' }) }} disabled={Boolean(item.check_out_time)} title={item.check_out_time ? 'Undo Check Out first to safely undo Check In.' : undefined}>Undo Check In</button>}{item.check_out_time && item.check_in_time && <button className="ghost-button table-action undo-check-out" type="button" onClick={() => { setUndoError(''); setUndoConfirmation({ record: item, event: 'check_out' }) }}>Undo Check Out</button>}{item.check_in_time && item.check_out_time && <small className="undo-sequence-hint">Undo Check Out first.</small>}</div></td></tr>)}</tbody></table>{!records.length && <div className="empty-state">No active employees found.</div>}</div></section></div><AdminPrivateComments/>{exportDialogOpen && <ExportDialog selectedDate={selectedDate} onClose={() => setExportDialogOpen(false)} onExport={exportData} isExporting={isExporting} exportError={exportError} />}{photoViewer && <AdminPhotoModal viewer={photoViewer} onClose={() => setPhotoViewer(null)} />}{undoConfirmation && <AttendanceUndoDialog record={undoConfirmation.record} event={undoConfirmation.event} onCancel={() => { setUndoConfirmation(null); setUndoError('') }} onConfirm={confirmUndo} busy={undoBusy} error={undoError} />}</>
+  return (
+    <>
+      <section className="hero-strip compact">
+        <div>
+          <span className="eyebrow cyan">LIVE OPERATIONS / OVERVIEW</span>
+          <h2>Attendance register</h2>
+          <p>Review employee attendance by day and export the stored check-in/check-out records.</p>
+        </div>
+        <label className="date-picker">
+          Selected day
+          <IndiaDateInput value={selectedDate} onChange={chooseDate} />
+        </label>
+      </section>
+
+      <div className="stats-grid">
+        {[['TOTAL EMPLOYEES', stats.total_employees, Users], ['PRESENT', stats.present_today, Check], ['ABSENT', stats.absent_today, X]].map(([label, value, Icon]) => (
+          <div className="stat-card" key={label}>
+            <Icon size={17} />
+            <span>{label}</span>
+            <strong>{value ?? '-'}</strong>
+          </div>
+        ))}
+      </div>
+
+      <div className="admin-dashboard-grid">
+        <section className="panel calendar-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">ATTENDANCE CALENDAR</span>
+              <h3>{new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h3>
+            </div>
+            <div className="calendar-actions">
+              <button className="icon-button" title="Previous month" onClick={() => shiftMonth(-1)}><ArrowLeft size={16} /></button>
+              <button className="icon-button" title="Next month" onClick={() => shiftMonth(1)}><ArrowRight size={16} /></button>
+            </div>
+          </div>
+          <div className="calendar-weekdays">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => <span key={day}>{day}</span>)}</div>
+          <div className="calendar-grid">{renderCalendar()}</div>
+        </section>
+
+        <section className="panel table-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">ATTENDANCE LOG / {formatIndiaDate(selectedDate)}</span>
+              <h3>Daily Attendance Register</h3>
+            </div>
+            <button className="ghost-button" type="button" onClick={() => { setExportError(''); setExportDialogOpen(true) }}><Download size={16} />Export data</button>
+          </div>
+
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Department</th>
+                  <th>In</th>
+                  <th>In location</th>
+                  <th>Check-in Photo</th>
+                  <th>Out</th>
+                  <th>Out location</th>
+                  <th>Check-out Photo</th>
+                  <th>Status</th>
+                  <th>Undo Events</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map(item => (
+                  <tr key={item.attendance_id}>
+                    <td>
+                      <b>{item.employee?.full_name || item.user_name || item.employee_id}</b>
+                      <small>{item.employee_id}</small>
+                    </td>
+                    <td>{item.employee?.department || '-'}</td>
+                    <td>{item.check_in_time ? `${formatKolkataTime(item.check_in_time)} IST` : '-'}</td>
+                    <td>{formatLocation(item.check_in_location)}</td>
+                    <td>{photoCell(item, 'check_in')}</td>
+                    <td>{item.check_out_time ? `${formatKolkataTime(item.check_out_time)} IST` : 'Open'}</td>
+                    <td>{formatLocation(item.check_out_location)}</td>
+                    <td>{photoCell(item, 'check_out')}</td>
+                    <td>
+                      <span className={item.final_status === 'PRESENT' ? 'badge verified' : 'badge absent'}>{item.final_status}</span>
+                    </td>
+                    <td>
+                      <div className="attendance-undo-actions">
+                        {item.check_in_time && (
+                          <button
+                            className="ghost-button table-action undo-check-in"
+                            type="button"
+                            onClick={() => { setUndoError(''); setUndoConfirmation({ record: item, event: 'check_in' }) }}
+                            disabled={Boolean(item.check_out_time)}
+                            title={item.check_out_time ? 'Undo Check Out first to safely undo Check In.' : undefined}
+                          >
+                            Undo Check In
+                          </button>
+                        )}
+                        {item.check_out_time && (
+                          <button
+                            className="ghost-button table-action undo-check-out"
+                            type="button"
+                            onClick={() => { setUndoError(''); setUndoConfirmation({ record: item, event: 'check_out' }) }}
+                          >
+                            Undo Check Out
+                          </button>
+                        )}
+                        {item.check_in_time && item.check_out_time && <small className="undo-sequence-hint">Undo Check Out first.</small>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!records.length && <div className="empty-state">No active employees found.</div>}
+          </div>
+        </section>
+      </div>
+
+      {exportDialogOpen && <ExportDialog selectedDate={selectedDate} onClose={() => setExportDialogOpen(false)} onExport={exportData} isExporting={isExporting} exportError={exportError} />}
+      {photoViewer && <AdminPhotoModal viewer={photoViewer} onClose={() => setPhotoViewer(null)} />}
+      {undoConfirmation && <AttendanceUndoDialog record={undoConfirmation.record} event={undoConfirmation.event} onCancel={() => { setUndoConfirmation(null); setUndoError('') }} onConfirm={confirmUndo} busy={undoBusy} error={undoError} />}
+    </>
+  )
+
 }
 
 function RecoveryEmailVerificationPanel({ challenge, onVerified }) {
