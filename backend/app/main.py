@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from app.api import auth, employees, attendance, admin, audit, attendance_reminders
+from app.api import auth, employees, attendance, attendance_notes, admin, audit, attendance_reminders
 from app.core.config import get_settings
 from app.core.rate_limit import limiter
 from app.db.mongodb import init_indexes
@@ -42,6 +42,8 @@ def health():
 app.include_router(auth.router)
 app.include_router(employees.router)
 app.include_router(attendance.router)
+app.include_router(attendance_notes.admin_router)
+app.include_router(attendance_notes.router)
 app.include_router(admin.router)
 app.include_router(audit.router)
 app.include_router(attendance_reminders.router)

@@ -172,3 +172,30 @@ html{overflow-x:hidden}body{overflow-x:hidden}.app-shell,.main-content,.panel,.h
 @media(max-width:359px){.undo-dialog-overlay{padding:8px}.undo-dialog{max-height:calc(100dvh - 16px);padding:14px}.undo-dialog-actions{grid-template-columns:1fr}.attendance-undo-actions{min-width:125px}}
 @media (orientation:landscape) and (max-height:520px){.undo-dialog-overlay{place-items:start center;padding:8px}.undo-dialog{max-height:calc(100dvh - 16px)}}
 .password-input-wrap{position:relative;display:block;width:100%}.password-input-wrap .password-input{width:100%;padding-right:48px}.password-visibility-toggle{position:absolute;top:50%;right:8px;display:grid;place-items:center;width:32px;height:32px;min-height:32px;padding:0;transform:translateY(-50%);border:0;border-radius:6px;background:transparent;color:var(--muted)}.password-visibility-toggle:hover:not(:disabled){color:var(--cyan)}.password-visibility-toggle:focus-visible{outline:2px solid var(--cyan);outline-offset:1px}
+.attendance-note-section{display:grid;gap:9px;min-width:0;width:100%;padding:13px;margin-top:12px;border:1px solid rgba(97,228,225,.3);background:rgba(10,31,47,.76);overflow-wrap:anywhere}
+.attendance-note-label{color:var(--cyan);font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase}
+.attendance-note-content{margin:0;color:#eaf2ff;font-size:13px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.attendance-note-empty{margin:0;color:var(--muted);font-size:12px}
+.attendance-note-status{display:flex;align-items:flex-start;gap:7px;color:var(--muted);font-size:11px;line-height:1.4;overflow-wrap:anywhere}
+.attendance-note-status svg{flex:0 0 auto;margin-top:1px;color:var(--cyan)}
+.attendance-note-actions{display:flex;flex-wrap:wrap;gap:8px}
+.attendance-note-actions button,.attendance-note-add{min-height:40px;justify-content:center}
+.attendance-note-delete{color:#ffc0c8;border-color:rgba(255,143,158,.45)}
+.attendance-history-row .attendance-note-section{grid-column:1/-1}
+.table-scroll td .attendance-note-section{min-width:240px;max-width:360px;margin:0}
+.attendance-note-editor-overlay{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:clamp(12px,4vw,44px);background:rgba(3,9,16,.97);overflow:auto}
+.attendance-note-editor{display:flex;flex-direction:column;gap:16px;width:min(920px,100%);height:min(880px,100%);min-height:min(540px,100%);padding:clamp(20px,4vw,44px);background:var(--panel);border:1px solid var(--line);box-shadow:0 24px 80px rgba(0,0,0,.55)}
+.attendance-note-editor-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.attendance-note-editor-heading h2{margin:10px 0 6px;font-size:clamp(24px,4vw,34px)}
+.attendance-note-editor-heading p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
+.attendance-note-editor-heading .icon-button{flex:0 0 auto}
+.attendance-note-field{display:grid;flex:1;gap:9px;min-height:0;color:var(--muted);font-size:12px}
+.attendance-note-field textarea{width:100%;height:100%;min-height:180px;resize:vertical;border:1px solid var(--line);background:#081523;color:#fff;padding:14px;outline:0;font:inherit;font-size:15px;line-height:1.6}
+.attendance-note-field textarea:focus{border-color:var(--cyan)}
+.attendance-note-count{color:var(--muted);font-size:11px;text-align:right}
+.attendance-note-editor-actions{display:flex;justify-content:flex-end;gap:10px}
+.attendance-note-editor-actions button{min-width:130px;min-height:46px;justify-content:center}
+.admin-attendance-note{display:grid;gap:9px;min-width:0;padding:15px;border:1px solid rgba(97,228,225,.35);background:linear-gradient(135deg,rgba(14,48,65,.92),rgba(10,25,40,.96));overflow-wrap:anywhere}
+.admin-attendance-note p{margin:0;color:#eaf2ff;font-size:14px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.admin-attendance-note small{color:var(--muted);font-size:11px}
+@media(max-width:600px){.attendance-note-editor-overlay{padding:0}.attendance-note-editor{width:100%;height:100%;min-height:100%;padding:22px 18px max(18px,env(safe-area-inset-bottom));border:0}.attendance-note-editor-actions{display:grid;grid-template-columns:1fr 1fr}.attendance-note-editor-actions button{min-width:0}.attendance-note-editor-heading h2{font-size:25px}.admin-photo-card{max-width:100%;min-width:0}.admin-attendance-note{padding:12px}}

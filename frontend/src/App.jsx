@@ -90,6 +90,15 @@ async function exportErrorMessage(error) {
   return `${status} ${label}${detail ? `: ${detail}` : '.'}`
 }
 
+function loginErrorMessage(error) {
+  if (!error.response) return 'Unable to sign in right now. Please check your connection.'
+  if (error.response.status === 401) return 'Email or password not recognized. Check your credentials or use Forgot password.'
+  if (error.response.status === 403) return 'This account is inactive. Contact an administrator for help.'
+  if (error.response.status === 422) return 'Enter a valid work email and password, then try again.'
+  if (error.response.status === 429) return 'Too many sign-in attempts. Wait a moment and try again.'
+  return 'Sign-in service is temporarily unavailable. Please try again later.'
+}
+
 function Shell({ user, onLogout, children }) {
   const navigate = useNavigate()
   const location = useLocation()
@@ -126,7 +135,7 @@ export function Login({ onLogin }) {
       onLogin(data.user)
       navigate(data.user.role === 'admin' ? '/admin' : '/attendance')
     } catch (err) {
-      setError(err.response ? 'Incorrect email or password.' : 'Unable to sign in right now. Please check your connection.')
+      setError(loginErrorMessage(err))
     } finally {
       setBusy(false)
     }
@@ -198,10 +207,14 @@ export function Login({ onLogin }) {
   </div>
 }
 
-function AdminPhotoModal({ viewer, onClose }) {
+export function AdminPhotoModal({ viewer, onClose }) {
   const [url, setUrl] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [note, setNote] = useState(null)
+  const [noteError, setNoteError] = useState('')
+  const [, setNoteExpiryTick] = useState(0)
+  const activeNote = note && new Date(note.expires_at).getTime() > Date.now() ? note : null
   const eventLabel = viewer.event === 'check_in' ? 'Check In' : 'Check Out'
   useEffect(() => {
     const onKey = event => { if (event.key === 'Escape') onClose() }
@@ -231,6 +244,24 @@ function AdminPhotoModal({ viewer, onClose }) {
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [viewer.attendanceId, viewer.event])
+  useEffect(() => {
+    let cancelled = false
+    setNote(null)
+    setNoteError('')
+    api.get(`/api/attendance/admin/${viewer.attendanceId}/note`)
+      .then(({ data }) => { if (!cancelled) setNote(data) })
+      .catch(requestError => {
+        if (cancelled || requestError.response?.status === 404) return
+        setNoteError('Could not load the attendance note.')
+      })
+    return () => { cancelled = true }
+  }, [viewer.attendanceId])
+  useEffect(() => {
+    if (!note) return undefined
+    const delay = new Date(note.expires_at).getTime() - Date.now()
+    const timer = window.setTimeout(() => setNoteExpiryTick(Date.now()), Math.max(delay, 0))
+    return () => window.clearTimeout(timer)
+  }, [note])
   return (
     <div className="photo-capture-overlay admin-photo-modal" role="dialog" aria-modal="true" aria-label={`${eventLabel} attendance photo`} onClick={event => { if (event.target === event.currentTarget) onClose() }}>
       <div className="photo-capture-card admin-photo-card">
@@ -240,6 +271,8 @@ function AdminPhotoModal({ viewer, onClose }) {
         {loading && <div className="admin-photo-loading">Loading photo...</div>}
         {error && <div className="error-box"><X size={16}/>{error}</div>}
         {url && <img src={url} alt={`${eventLabel} attendance photo for ${viewer.employee}`} />}
+        {activeNote && <aside className="admin-attendance-note"><span className="eyebrow cyan">TEMPORARY ATTENDANCE NOTE</span><p>{activeNote.content}</p><small>{activeNote.employee_name} · {formatIndiaDate(activeNote.date)}</small></aside>}
+        {noteError && <div className="error-box" role="alert"><X size={16}/>{noteError}</div>}
         <button className="ghost-button admin-photo-close" type="button" onClick={onClose}>Close</button>
       </div>
     </div>

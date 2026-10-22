@@ -32,6 +32,7 @@ describe('employee attendance history undo controls', () => {
     api.post.mockResolvedValue({ data: { success: true } })
     api.get
       .mockResolvedValueOnce({ data: [fullyCheckedInRecord] })
+      .mockResolvedValueOnce({ data: [] })
       .mockResolvedValueOnce({ data: [afterCheckOutUndo] })
       .mockResolvedValueOnce({ data: [afterCheckInUndo] })
     render(<EmployeeAttendanceHistory/>)
@@ -62,6 +63,6 @@ describe('employee attendance history undo controls', () => {
     await waitFor(() => expect(screen.getByText('ABSENT')).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Undo Check In' })).toBeNull()
     expect(api.post).toHaveBeenLastCalledWith('/api/attendance/mine/att-1/undo-check-in')
-    expect(api.get).toHaveBeenCalledTimes(3)
+    expect(api.get).toHaveBeenCalledTimes(4)
   })
 })

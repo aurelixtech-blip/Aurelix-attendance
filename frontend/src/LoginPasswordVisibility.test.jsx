@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import api from './services/api'
@@ -45,5 +45,22 @@ describe('login password visibility control', () => {
       email: 'employee@example.com',
       password: 'Correct-Horse-42',
     })
+  })
+
+  it.each([
+    [{ response: { status: 401 } }, 'Email or password not recognized. Check your credentials or use Forgot password.'],
+    [{ response: { status: 403 } }, 'This account is inactive. Contact an administrator for help.'],
+    [{ response: { status: 429 } }, 'Too many sign-in attempts. Wait a moment and try again.'],
+    [{ response: { status: 500 } }, 'Sign-in service is temporarily unavailable. Please try again later.'],
+    [{ request: {} }, 'Unable to sign in right now. Please check your connection.'],
+  ])('shows an accurate login message for each failure type', async (failure, message) => {
+    api.post.mockRejectedValue(failure)
+    render(<MemoryRouter><Login onLogin={vi.fn()}/></MemoryRouter>)
+
+    await userEvent.setup().type(screen.getByPlaceholderText('you@aurelix.com'), 'employee@example.com')
+    await userEvent.setup().type(screen.getByPlaceholderText('Password'), 'Test-password-123')
+    fireEvent.submit(screen.getByRole('button', { name: /Enter workspace/ }).closest('form'))
+
+    expect(await screen.findByText(message)).toBeTruthy()
   })
 })

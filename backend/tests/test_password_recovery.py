@@ -148,6 +148,52 @@ def test_login_returns_the_database_role(monkeypatch, role):
     assert security.decode_access_token(response.json()["access_token"])["role"] == role
 
 
+def test_login_normalizes_email_case_and_surrounding_whitespace(monkeypatch):
+    account = make_employee(email="admin@aurelix.com", role="admin")
+    client, _db, _email = recovery_client(monkeypatch, [account])
+
+    response = client.post(
+        "/api/auth/login",
+        json={"email": "  ADMIN@AURELIX.COM  ", "password": "OldPassword123!"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["email"] == "admin@aurelix.com"
+
+
+def test_invalid_password_and_unknown_email_share_the_same_generic_response(monkeypatch):
+    account = make_employee(email="admin@aurelix.com", role="admin")
+    client, _db, _email = recovery_client(monkeypatch, [account])
+
+    invalid_password = client.post(
+        "/api/auth/login",
+        json={"email": "admin@aurelix.com", "password": "WrongPassword123!"},
+    )
+    unknown_email = client.post(
+        "/api/auth/login",
+        json={"email": "not-registered@example.com", "password": "WrongPassword123!"},
+    )
+
+    assert invalid_password.status_code == 401
+    assert unknown_email.status_code == invalid_password.status_code
+    assert invalid_password.json()["detail"] == "Incorrect email or password."
+    assert unknown_email.json()["detail"] == invalid_password.json()["detail"]
+
+
+def test_inactive_account_with_valid_password_returns_forbidden(monkeypatch):
+    account = make_employee(email="admin@aurelix.com", role="admin")
+    account["is_active"] = False
+    client, _db, _email = recovery_client(monkeypatch, [account])
+
+    response = client.post(
+        "/api/auth/login",
+        json={"email": "admin@aurelix.com", "password": "OldPassword123!"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Employee account is inactive"
+
+
 def test_administrators_authenticate_as_their_own_accounts(monkeypatch):
     system_admin = make_employee(
         employee_id="ADM-001",

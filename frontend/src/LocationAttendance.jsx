@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Camera, Check, MapPin, SwitchCamera, X } from 'lucide-react'
 import api from './services/api'
 import EmployeeAttendanceUndo from './EmployeeAttendanceUndo'
+import EmployeeAttendanceNote from './EmployeeAttendanceNote'
 import { formatIndiaDate, formatKolkataDate, formatKolkataTime, kolkataDateKey } from './time'
 
 function formatLocation(location) {
@@ -74,6 +75,9 @@ function stopMediaStream(stream) {
 
 export default function LocationAttendance() {
   const [history, setHistory] = useState([])
+  const [notes, setNotes] = useState({})
+  const [noteLoadError, setNoteLoadError] = useState('')
+  const [notesLoading, setNotesLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -94,7 +98,29 @@ export default function LocationAttendance() {
   async function loadHistory() {
     const { data } = await api.get('/api/attendance/mine')
     setHistory(data)
+    try {
+      const { data: savedNotes } = await api.get('/api/attendance/notes')
+      setNotes(Object.fromEntries(savedNotes.map(note => [note.date, note])))
+      setNoteLoadError('')
+    } catch {
+      setNoteLoadError('Could not load temporary attendance notes.')
+    } finally {
+      setNotesLoading(false)
+    }
     return data
+  }
+
+  function saveNote(note) {
+    setNotes(current => ({ ...current, [note.date]: note }))
+    setNoteLoadError('')
+  }
+
+  function deleteNote(date) {
+    setNotes(current => {
+      const next = { ...current }
+      delete next[date]
+      return next
+    })
   }
 
   useEffect(() => { loadHistory().catch(() => setError('Could not load attendance history.')) }, [])
@@ -326,7 +352,7 @@ export default function LocationAttendance() {
           </>}
         </div>
       </div>}
-      {message && <div className="success-box"><Check size={17}/>{message}</div>}{error && <div className="error-box"><X size={16}/>{error}</div>}<div className="checks"><span><Camera size={15}/> Photo required before recording</span><span><MapPin size={15}/> One-time browser location</span><span><Check size={15}/> Server timestamp recorded</span></div>{import.meta.env.DEV && locationDiagnostics && <div className="location-diagnostics"><h4>Development location diagnostics</h4><span>Device: {locationDiagnostics.device}</span><span>Browser: {locationDiagnostics.browser}</span><span>Secure context: {locationDiagnostics.secureContext ? 'yes' : 'no'}</span><span>Permission: {locationDiagnostics.permission}</span><span>Readings: {locationDiagnostics.readings.length}</span>{locationDiagnostics.selected && <><span>Latitude: {locationDiagnostics.selected.latitude}</span><span>Longitude: {locationDiagnostics.selected.longitude}</span><span>Accuracy: {locationDiagnostics.selected.accuracy} meters</span><span>Timestamp: {formatIndiaDate(locationDiagnostics.selected.timestamp)} {formatKolkataTime(locationDiagnostics.selected.timestamp)} IST</span><span>Selected: lowest accuracy reading</span></>}{locationDiagnostics.resolvedArea && <span>Reverse-geocoded area: {locationDiagnostics.resolvedArea}</span>}</div>}</section><section className="panel status-panel"><div className="panel-heading"><h3>Today's status</h3></div><div className={todayRecord?.final_status === 'ABSENT' ? 'big-status absent' : 'big-status'}>{todayRecord?.final_status || 'READY'}<small>{todayRecord?.check_in_time ? `In ${formatKolkataTime(todayRecord.check_in_time)} IST` : 'No check-in recorded'}</small></div><div className="history-list">{todayRecord && <><div className="history-row"><span>Check-in location</span><LocationDetails location={todayRecord.check_in_location}/></div><div className="history-row"><span>Check-out</span><b>{todayRecord.check_out_time ? `${formatKolkataTime(todayRecord.check_out_time)} IST` : 'Open'}</b></div><div className="history-row"><span>Check-out location</span><LocationDetails location={todayRecord.check_out_location}/></div></>}</div></section></div>
-    <section className="panel table-panel"><span className="eyebrow">MY ATTENDANCE</span><h2>Attendance history</h2><div className="history-list">{history.map(item => <div className="history-row attendance-history-row" key={item.attendance_id}><b>{formatIndiaDate(item.date)}</b><span>{item.check_in_time ? `${formatKolkataTime(item.check_in_time)} IST` : '-'}</span><LocationDetails location={item.check_in_location}/><span>{item.check_out_time ? `${formatKolkataTime(item.check_out_time)} IST` : 'Open'}</span><LocationDetails location={item.check_out_location}/><span className={statusBadgeClass(item.final_status)}>{item.final_status}</span><EmployeeAttendanceUndo record={item} onRefresh={setHistory}/></div>)}</div></section>
+      {message && <div className="success-box"><Check size={17}/>{message}</div>}{error && <div className="error-box"><X size={16}/>{error}</div>}<div className="checks"><span><Camera size={15}/> Photo required before recording</span><span><MapPin size={15}/> One-time browser location</span><span><Check size={15}/> Server timestamp recorded</span></div>{import.meta.env.DEV && locationDiagnostics && <div className="location-diagnostics"><h4>Development location diagnostics</h4><span>Device: {locationDiagnostics.device}</span><span>Browser: {locationDiagnostics.browser}</span><span>Secure context: {locationDiagnostics.secureContext ? 'yes' : 'no'}</span><span>Permission: {locationDiagnostics.permission}</span><span>Readings: {locationDiagnostics.readings.length}</span>{locationDiagnostics.selected && <><span>Latitude: {locationDiagnostics.selected.latitude}</span><span>Longitude: {locationDiagnostics.selected.longitude}</span><span>Accuracy: {locationDiagnostics.selected.accuracy} meters</span><span>Timestamp: {formatIndiaDate(locationDiagnostics.selected.timestamp)} {formatKolkataTime(locationDiagnostics.selected.timestamp)} IST</span><span>Selected: lowest accuracy reading</span></>}{locationDiagnostics.resolvedArea && <span>Reverse-geocoded area: {locationDiagnostics.resolvedArea}</span>}</div>}</section><section className="panel status-panel"><div className="panel-heading"><h3>Today's status</h3></div><div className={todayRecord?.final_status === 'ABSENT' ? 'big-status absent' : 'big-status'}>{todayRecord?.final_status || 'READY'}<small>{todayRecord?.check_in_time ? `In ${formatKolkataTime(todayRecord.check_in_time)} IST` : 'No check-in recorded'}</small></div><div className="history-list">{todayRecord && <><div className="history-row"><span>Check-in location</span><LocationDetails location={todayRecord.check_in_location}/></div><div className="history-row"><span>Check-out</span><b>{todayRecord.check_out_time ? `${formatKolkataTime(todayRecord.check_out_time)} IST` : 'Open'}</b></div><div className="history-row"><span>Check-out location</span><LocationDetails location={todayRecord.check_out_location}/></div><EmployeeAttendanceNote date={todayRecord.date} note={notes[todayRecord.date]} loading={notesLoading} onSaved={saveNote} onDeleted={deleteNote}/></>}</div>{noteLoadError && <div className="error-box" role="alert"><X size={16}/>{noteLoadError}</div>}</section></div>
+    <section className="panel table-panel"><span className="eyebrow">MY ATTENDANCE</span><h2>Attendance history</h2><div className="history-list">{history.map(item => <div className="history-row attendance-history-row" key={item.attendance_id}><b>{formatIndiaDate(item.date)}</b><span>{item.check_in_time ? `${formatKolkataTime(item.check_in_time)} IST` : '-'}</span><LocationDetails location={item.check_in_location}/><span>{item.check_out_time ? `${formatKolkataTime(item.check_out_time)} IST` : 'Open'}</span><LocationDetails location={item.check_out_location}/><span className={statusBadgeClass(item.final_status)}>{item.final_status}</span><EmployeeAttendanceUndo record={item} onRefresh={setHistory}/>{item.date !== today && <EmployeeAttendanceNote date={item.date} note={notes[item.date]} loading={notesLoading} onSaved={saveNote} onDeleted={deleteNote}/>}</div>)}</div></section>
   </>
 }

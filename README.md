@@ -147,6 +147,8 @@ Sign in as the admin and open **People** to create and manage employees.
 
 Only administrators can reverse attendance events. **Undo Check Out** clears only check-out data and its photo reference; **Undo Check In** clears only check-in data and is blocked until any check-out has first been undone. Each successful operation is audit logged, and the photo file itself is not deleted.
 
+Employees can add one temporary note to each attendance date in their attendance panel or history. Notes are visible only to their owner and to administrators viewing a photo for the matching attendance record. A note expires 24 hours after it was first created; edits do not extend that deadline, and MongoDB's TTL index performs physical cleanup after expiration. The API also filters expired notes before returning or updating them.
+
 The application does not continuously track employees and does not reject attendance based on coordinates.
 
 ### Location behavior
