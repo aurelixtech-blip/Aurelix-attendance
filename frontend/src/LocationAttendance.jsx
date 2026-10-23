@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Camera, Check, MapPin, SwitchCamera, X } from 'lucide-react'
 import api from './services/api'
+import EmployeeAttendanceUndo from './EmployeeAttendanceUndo'
 import EmployeeAttendanceNote from './EmployeeAttendanceNote'
 import { formatIndiaDate, formatKolkataDate, formatKolkataTime, kolkataDateKey } from './time'
 
@@ -70,6 +71,7 @@ function stopMediaStream(stream) {
 
 export default function LocationAttendance() {
   const [history, setHistory] = useState([])
+  const [today, setToday] = useState(() => kolkataDateKey())
   const [notes, setNotes] = useState({})
   const [noteLoadError, setNoteLoadError] = useState('')
   const [notesLoading, setNotesLoading] = useState(true)
@@ -85,7 +87,6 @@ export default function LocationAttendance() {
   const videoRef = useRef(null)
   const streamRef = useRef(null)
   const photoPreviewRef = useRef('')
-  const today = kolkataDateKey()
   const todayRecord = history.find(item => item.date === today)
   const action = todayRecord?.check_in_time && !todayRecord?.check_out_time ? 'check_out' : 'check_in'
   const actionLabel = action === 'check_in' ? 'Check In' : 'Check Out'
@@ -119,6 +120,16 @@ export default function LocationAttendance() {
   }
 
   useEffect(() => { loadHistory().catch(() => setError('Could not load attendance history.')) }, [])
+
+  useEffect(() => {
+    const refreshToday = () => setToday(kolkataDateKey())
+    const intervalId = window.setInterval(refreshToday, 60_000)
+    window.addEventListener('focus', refreshToday)
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', refreshToday)
+    }
+  }, [])
 
   useEffect(() => () => {
     stopMediaStream(streamRef.current)
@@ -347,6 +358,6 @@ export default function LocationAttendance() {
           </>}
         </div>
       </div>}
-      {message && <div className="success-box"><Check size={17}/>{message}</div>}{error && <div className="error-box"><X size={16}/>{error}</div>}<div className="checks"><span><Camera size={15}/> Photo required before recording</span><span><MapPin size={15}/> One-time browser location</span><span><Check size={15}/> Server timestamp recorded</span></div>{import.meta.env.DEV && locationDiagnostics && <div className="location-diagnostics"><h4>Development location diagnostics</h4><span>Device: {locationDiagnostics.device}</span><span>Browser: {locationDiagnostics.browser}</span><span>Secure context: {locationDiagnostics.secureContext ? 'yes' : 'no'}</span><span>Permission: {locationDiagnostics.permission}</span><span>Readings: {locationDiagnostics.readings.length}</span>{locationDiagnostics.selected && <><span>Latitude: {locationDiagnostics.selected.latitude}</span><span>Longitude: {locationDiagnostics.selected.longitude}</span><span>Accuracy: {locationDiagnostics.selected.accuracy} meters</span><span>Timestamp: {formatIndiaDate(locationDiagnostics.selected.timestamp)} {formatKolkataTime(locationDiagnostics.selected.timestamp)} IST</span><span>Selected: lowest accuracy reading</span></>}{locationDiagnostics.resolvedArea && <span>Reverse-geocoded area: {locationDiagnostics.resolvedArea}</span>}</div>}</section><section className="panel status-panel"><div className="panel-heading"><h3>Today's status</h3></div><div className={todayRecord?.final_status === 'ABSENT' ? 'big-status absent' : 'big-status'}>{todayRecord?.final_status || 'READY'}<small>{todayRecord?.check_in_time ? `In ${formatKolkataTime(todayRecord.check_in_time)} IST` : 'No check-in recorded'}</small></div><div className="history-list">{todayRecord && <><div className="history-row"><span>Check-in location</span><LocationDetails location={todayRecord.check_in_location}/></div><div className="history-row"><span>Check-out</span><b>{todayRecord.check_out_time ? `${formatKolkataTime(todayRecord.check_out_time)} IST` : 'Open'}</b></div><div className="history-row"><span>Check-out location</span><LocationDetails location={todayRecord.check_out_location}/></div><EmployeeAttendanceNote date={todayRecord.date} note={notes[todayRecord.date]} loading={notesLoading} onSaved={saveNote} onDeleted={deleteNote}/></>}</div>{noteLoadError && <div className="error-box" role="alert"><X size={16}/>{noteLoadError}</div>}</section></div>
+      {message && <div className="success-box"><Check size={17}/>{message}</div>}{error && <div className="error-box"><X size={16}/>{error}</div>}<div className="checks"><span><Camera size={15}/> Photo required before recording</span><span><MapPin size={15}/> One-time browser location</span><span><Check size={15}/> Server timestamp recorded</span></div>{import.meta.env.DEV && locationDiagnostics && <div className="location-diagnostics"><h4>Development location diagnostics</h4><span>Device: {locationDiagnostics.device}</span><span>Browser: {locationDiagnostics.browser}</span><span>Secure context: {locationDiagnostics.secureContext ? 'yes' : 'no'}</span><span>Permission: {locationDiagnostics.permission}</span><span>Readings: {locationDiagnostics.readings.length}</span>{locationDiagnostics.selected && <><span>Latitude: {locationDiagnostics.selected.latitude}</span><span>Longitude: {locationDiagnostics.selected.longitude}</span><span>Accuracy: {locationDiagnostics.selected.accuracy} meters</span><span>Timestamp: {formatIndiaDate(locationDiagnostics.selected.timestamp)} {formatKolkataTime(locationDiagnostics.selected.timestamp)} IST</span><span>Selected: lowest accuracy reading</span></>}{locationDiagnostics.resolvedArea && <span>Reverse-geocoded area: {locationDiagnostics.resolvedArea}</span>}</div>}</section><section className="panel status-panel"><div className="panel-heading"><h3>Today's status</h3></div><div className={todayRecord?.final_status === 'ABSENT' ? 'big-status absent' : 'big-status'}>{todayRecord?.final_status || 'READY'}<small>{todayRecord?.check_in_time ? `In ${formatKolkataTime(todayRecord.check_in_time)} IST` : 'No check-in recorded'}</small></div>{todayRecord && <EmployeeAttendanceUndo record={todayRecord} onRefresh={setHistory}/>}<div className="history-list">{todayRecord && <><div className="history-row"><span>Check-in location</span><LocationDetails location={todayRecord.check_in_location}/></div><div className="history-row"><span>Check-out</span><b>{todayRecord.check_out_time ? `${formatKolkataTime(todayRecord.check_out_time)} IST` : 'Open'}</b></div><div className="history-row"><span>Check-out location</span><LocationDetails location={todayRecord.check_out_location}/></div><EmployeeAttendanceNote date={todayRecord.date} note={notes[todayRecord.date]} loading={notesLoading} onSaved={saveNote} onDeleted={deleteNote}/></>}</div>{noteLoadError && <div className="error-box" role="alert"><X size={16}/>{noteLoadError}</div>}</section></div>
   </>
 }
