@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import api from './services/api'
 import EmployeeAttendanceHistory from './EmployeeAttendanceHistory'
+import { formatIndiaDate } from './time'
 
 vi.mock('./services/api', () => ({ default: { get: vi.fn(), post: vi.fn() } }))
 
@@ -64,5 +65,22 @@ describe('employee attendance history undo controls', () => {
     expect(screen.queryByRole('button', { name: 'Undo Check In' })).toBeNull()
     expect(api.post).toHaveBeenLastCalledWith('/api/attendance/mine/att-1/undo-check-in')
     expect(api.get).toHaveBeenCalledTimes(4)
+  })
+
+  it('keeps each historical note in the row for its attendance date', async () => {
+    const firstRecord = { ...fullyCheckedInRecord, date: '2026-10-05' }
+    const secondRecord = { ...fullyCheckedInRecord, attendance_id: 'att-2', date: '2026-10-04' }
+    const historicalNote = { date: secondRecord.date, content: 'Note for October fourth' }
+    api.get.mockImplementation(url => Promise.resolve({
+      data: url.endsWith('/notes') ? [historicalNote] : [firstRecord, secondRecord],
+    }))
+    render(<EmployeeAttendanceHistory/>)
+
+    const note = await screen.findByText('Note for October fourth')
+    const matchingRow = screen.getByText(formatIndiaDate(secondRecord.date)).closest('tr')
+    const otherRow = screen.getByText(formatIndiaDate(firstRecord.date)).closest('tr')
+    expect(within(matchingRow).getByText('Note for October fourth')).toBe(note)
+    expect(within(otherRow).queryByText('Note for October fourth')).toBeNull()
+    expect(within(matchingRow).getByRole('button', { name: 'Edit note' })).toBeTruthy()
   })
 })

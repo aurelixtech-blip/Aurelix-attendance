@@ -100,7 +100,7 @@ def test_employee_creates_reads_edits_and_deletes_own_note(api_client):
     created = client.post(f"/api/attendance/notes/{DATE}", json={"content": "Doctor appointment"})
     assert created.status_code == 200
     assert created.json()["content"] == "Doctor appointment"
-    assert created.json()["expires_at"] == "2026-10-21T12:00:00+00:00"
+    assert "expires_at" not in created.json()
     assert client.get(f"/api/attendance/notes/{DATE}").json()["content"] == "Doctor appointment"
 
     assert client.post(f"/api/attendance/notes/{DATE}", json={"content": "Duplicate"}).status_code == 409
@@ -108,7 +108,9 @@ def test_employee_creates_reads_edits_and_deletes_own_note(api_client):
     assert updated.status_code == 200
     assert updated.json()["content"] == "Updated note"
     assert updated.json()["created_at"] == created.json()["created_at"]
-    assert updated.json()["expires_at"] == created.json()["expires_at"]
+    assert "expires_at" not in updated.json()
+    assert db.attendance_notes.documents[0]["employee_id"] == "EMP-1"
+    assert db.attendance_notes.documents[0]["date"] == DATE
     assert len(db.attendance_notes.documents) == 1
 
     deleted = client.delete(f"/api/attendance/notes/{DATE}")
@@ -148,31 +150,38 @@ def test_employee_cannot_create_note_without_their_attendance_record(api_client)
     assert client.post(f"/api/attendance/notes/{DATE}", json={"content": "No record"}).status_code == 404
 
 
-def test_expired_notes_are_hidden_and_cannot_be_edited(api_client, monkeypatch):
+def test_legacy_note_with_expired_timestamp_remains_readable_editable_and_deletable(api_client):
     client, db = api_client
-    db.attendance_notes.documents.append({
+    legacy_note = {
         "employee_id": "EMP-1",
         "date": DATE,
-        "content": "Expired",
-        "created_at": NOW - timedelta(hours=24),
-        "expires_at": NOW,
-        "updated_at": NOW - timedelta(hours=24),
-    })
-    assert client.get(f"/api/attendance/notes/{DATE}").status_code == 404
-    assert client.get("/api/attendance/notes").json() == []
-    assert client.get("/api/attendance/admin/att-1/note").status_code == 404
-    assert client.patch(f"/api/attendance/notes/{DATE}", json={"content": "Edit expired"}).status_code == 410
+        "content": "Legacy note",
+        "created_at": NOW - timedelta(days=3650),
+        "expires_at": NOW - timedelta(days=3649),
+        "updated_at": NOW - timedelta(days=3650),
+    }
+    db.attendance_notes.documents.append(legacy_note.copy())
 
-    class LaterDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return NOW + timedelta(seconds=1)
+    response = client.get(f"/api/attendance/notes/{DATE}")
+    assert response.status_code == 200
+    assert response.json()["content"] == "Legacy note"
+    assert client.get("/api/attendance/notes").json()[0]["content"] == "Legacy note"
+    admin_note = client.get("/api/attendance/admin/att-1/note")
+    assert admin_note.status_code == 200
+    assert admin_note.json()["content"] == "Legacy note"
+    assert "expires_at" not in response.json()
 
-    monkeypatch.setattr(notes_api, "datetime", LaterDateTime)
-    replacement = client.post(f"/api/attendance/notes/{DATE}", json={"content": "New note"})
-    assert replacement.status_code == 200
-    assert replacement.json()["created_at"] == "2026-10-20T12:00:01+00:00"
-    assert len(db.attendance_notes.documents) == 1
+    updated = client.patch(f"/api/attendance/notes/{DATE}", json={"content": "Edited legacy note"})
+    assert updated.status_code == 200
+    stored = db.attendance_notes.documents[0]
+    assert stored["content"] == "Edited legacy note"
+    assert stored["employee_id"] == "EMP-1"
+    assert stored["date"] == DATE
+    assert stored["created_at"] == legacy_note["created_at"]
+    assert stored["expires_at"] == legacy_note["expires_at"]
+
+    assert client.delete(f"/api/attendance/notes/{DATE}").status_code == 204
+    assert db.attendance_notes.documents == []
 
 
 def test_admin_note_is_derived_from_matching_attendance_employee_and_date(api_client):
@@ -201,25 +210,85 @@ def test_note_endpoints_require_authentication():
         app.dependency_overrides.clear()
 
 
-def test_mongodb_initializes_unique_note_and_expiry_indexes(monkeypatch):
+def test_mongodb_removes_only_the_attendance_note_expiry_index_and_preserves_data(monkeypatch):
     from app.db import mongodb
 
-    indexes = {}
+    note_indexes = [
+        {"name": "_id_", "key": {"_id": 1}},
+        {"name": "employee_date_unique", "key": {"employee_id": 1, "date": 1}, "unique": True},
+        {"name": "expires_at_1", "key": {"expires_at": 1}, "expireAfterSeconds": 0},
+        {"name": "archive_at_ttl", "key": {"archive_at": 1}, "expireAfterSeconds": 0},
+    ]
+    dropped_indexes = []
+    created_indexes = []
+    notes = [{"employee_id": "EMP-1", "date": DATE, "content": "Keep this note"}]
+    attendance = [{"employee_id": "EMP-1", "date": DATE, "check_in_time": NOW}]
 
     class Collection:
-        def __init__(self, name):
+        def __init__(self, name, indexes=None, documents=None):
             self.name = name
+            self.indexes = indexes if indexes is not None else []
+            self.documents = documents if documents is not None else []
 
         def create_index(self, keys, **options):
-            indexes[(self.name, str(keys))] = options
+            created_indexes.append((self.name, keys, options))
+
+        def list_indexes(self):
+            return list(self.indexes)
+
+        def drop_index(self, name):
+            dropped_indexes.append((self.name, name))
+            self.indexes[:] = [index for index in self.indexes if index["name"] != name]
 
     class FakeDb:
+        def __init__(self):
+            self.collections = {
+                "attendance_notes": Collection("attendance_notes", note_indexes, notes),
+                "attendance": Collection("attendance", documents=attendance),
+            }
+
+        def list_collection_names(self, filter=None):
+            return ["attendance_notes"] if filter else list(self.collections)
+
+        def collection(self, name):
+            if name not in self.collections:
+                self.collections[name] = Collection(name)
+            return self.collections[name]
+
         def __getattr__(self, name):
             if name == "fs":
-                return SimpleNamespace(files=Collection("fs.files"))
-            return Collection(name)
+                return SimpleNamespace(files=self.collection("fs.files"))
+            return self.collection(name)
 
-    monkeypatch.setattr(mongodb, "get_db", FakeDb)
+    db = FakeDb()
+
+    monkeypatch.setattr(mongodb, "get_db", lambda: db)
     mongodb.init_indexes()
-    assert indexes[("attendance_notes", "[('employee_id', 1), ('date', 1)]")]["unique"] is True
-    assert indexes[("attendance_notes", "expires_at")]["expireAfterSeconds"] == 0
+    mongodb.init_indexes()
+
+    assert dropped_indexes == [("attendance_notes", "expires_at_1")]
+    assert [index["name"] for index in db.attendance_notes.indexes] == [
+        "_id_",
+        "employee_date_unique",
+        "archive_at_ttl",
+    ]
+    assert ("attendance_notes", [("employee_id", 1), ("date", 1)], {"unique": True}) in created_indexes
+    assert not any(
+        collection == "attendance_notes" and options.get("expireAfterSeconds") is not None
+        for collection, _keys, options in created_indexes
+    )
+    assert notes == [{"employee_id": "EMP-1", "date": DATE, "content": "Keep this note"}]
+    assert attendance == [{"employee_id": "EMP-1", "date": DATE, "check_in_time": NOW}]
+
+
+def test_database_startup_aborts_if_note_ttl_index_cleanup_fails(monkeypatch):
+    from app import main
+    from app.db.mongodb import AttendanceNoteTtlIndexMigrationError
+
+    monkeypatch.setattr(
+        main,
+        "init_indexes",
+        lambda: (_ for _ in ()).throw(AttendanceNoteTtlIndexMigrationError("cleanup failed")),
+    )
+    with pytest.raises(AttendanceNoteTtlIndexMigrationError):
+        main.initialize_database()

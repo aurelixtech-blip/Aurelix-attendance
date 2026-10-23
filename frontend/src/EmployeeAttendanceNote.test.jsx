@@ -7,8 +7,7 @@ import EmployeeAttendanceNote from './EmployeeAttendanceNote'
 
 vi.mock('./services/api', () => ({ default: { post: vi.fn(), patch: vi.fn(), delete: vi.fn() } }))
 
-const expiry = new Date(Date.now() + 3600000).toISOString()
-const savedNote = { date: '2026-10-20', content: 'Arrived late due to transit', expires_at: expiry }
+const savedNote = { date: '2026-10-20', content: 'Arrived late due to transit' }
 
 describe('employee attendance notes', () => {
   beforeEach(() => {
@@ -21,7 +20,7 @@ describe('employee attendance notes', () => {
     vi.restoreAllMocks()
   })
 
-  it('creates a note in the full-screen editor and shows its expiry status', async () => {
+  it('creates a note in the full-screen editor without expiry UI', async () => {
     const user = userEvent.setup()
     const onSaved = vi.fn()
     api.post.mockResolvedValue({ data: savedNote })
@@ -38,7 +37,15 @@ describe('employee attendance notes', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(savedNote))
     expect(api.post).toHaveBeenCalledWith('/api/attendance/notes/2026-10-20', { content: savedNote.content })
     expect(screen.getByText('Arrived late due to transit')).toBeTruthy()
-    expect(screen.getByText(/remaining · expires/)).toBeTruthy()
+    expect(screen.queryByText(/expires|automatically deleted/i)).toBeNull()
+  })
+
+  it('continues to display a legacy note whose expiry timestamp is in the past', () => {
+    const legacyNote = { ...savedNote, expires_at: '2020-01-01T00:00:00Z' }
+    render(<EmployeeAttendanceNote date={savedNote.date} note={legacyNote} onSaved={vi.fn()} onDeleted={vi.fn()}/>)
+
+    expect(screen.getByText(savedNote.content)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Edit note' })).toBeTruthy()
   })
 
   it('edits an active note without using the create endpoint and confirms deletion', async () => {

@@ -8,13 +8,16 @@ from slowapi.errors import RateLimitExceeded
 from app.api import auth, employees, attendance, attendance_notes, admin, audit, attendance_reminders
 from app.core.config import get_settings
 from app.core.rate_limit import limiter
-from app.db.mongodb import init_indexes
+from app.db.mongodb import AttendanceNoteTtlIndexMigrationError, init_indexes
 
 logging.basicConfig(level=logging.INFO)
 
 def initialize_database():
     try:
         init_indexes()
+    except AttendanceNoteTtlIndexMigrationError:
+        logging.exception("Attendance-note expiry index cleanup failed; refusing to start")
+        raise
     except Exception:
         logging.exception("MongoDB unavailable; API will start but database operations will fail")
 

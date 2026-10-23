@@ -35,12 +35,12 @@ describe('admin attendance photo note display', () => {
     })
   }
 
-  it('shows the active note returned for the photo attendance record', async () => {
+  it('shows the saved note returned for the photo attendance record', async () => {
     mockPhotoAndNote(() => Promise.resolve({ data: {
       content: 'For this attendance date only',
       employee_name: 'Employee One',
       date: '2026-10-20',
-      expires_at: new Date(Date.now() + 3600000).toISOString(),
+      expires_at: '2020-01-01T00:00:00Z',
     } }))
     render(<AdminPhotoModal viewer={viewer} onClose={vi.fn()}/>)
 
@@ -49,10 +49,10 @@ describe('admin attendance photo note display', () => {
     expect(api.get).toHaveBeenCalledWith('/api/attendance/admin/attendance-1/note')
   })
 
-  it('shows the matching active note when the check-out photo is opened', async () => {
+  it('shows the matching saved note when the check-out photo is opened', async () => {
     const checkoutViewer = { ...viewer, event: 'check_out' }
     api.get.mockImplementation(url => url.endsWith('/note')
-      ? Promise.resolve({ data: { content: 'Checkout note', employee_name: 'Employee One', date: viewer.date, expires_at: new Date(Date.now() + 3600000).toISOString() } })
+      ? Promise.resolve({ data: { content: 'Checkout note', employee_name: 'Employee One', date: viewer.date } })
       : Promise.resolve({ data: new Blob(['photo'], { type: 'image/jpeg' }) }))
     render(<AdminPhotoModal viewer={checkoutViewer} onClose={vi.fn()}/>)
 
@@ -67,7 +67,7 @@ describe('admin attendance photo note display', () => {
     render(<AdminPhotoModal viewer={{ ...viewer, event: 'check_out' }} onClose={vi.fn()}/>)
 
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/attendance/admin/attendance-1/note'))
-    expect(screen.queryByText('TEMPORARY ATTENDANCE NOTE')).toBeNull()
+    expect(screen.queryByText('ATTENDANCE NOTE')).toBeNull()
     expect(document.querySelector('.admin-attendance-note')).toBeNull()
   })
 })

@@ -28,7 +28,7 @@ export default function EmployeeAttendanceHistory() {
       setNotes(Object.fromEntries(savedNotes.map(note => [note.date, note])))
       setNoteError('')
     } catch {
-      setNoteError('Could not load temporary attendance notes.')
+      setNoteError('Could not load attendance notes.')
     } finally {
       setNotesLoading(false)
     }

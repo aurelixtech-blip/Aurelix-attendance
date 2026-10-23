@@ -213,8 +213,6 @@ export function AdminPhotoModal({ viewer, onClose }) {
   const [loading, setLoading] = useState(true)
   const [note, setNote] = useState(null)
   const [noteError, setNoteError] = useState('')
-  const [, setNoteExpiryTick] = useState(0)
-  const activeNote = note && new Date(note.expires_at).getTime() > Date.now() ? note : null
   const eventLabel = viewer.event === 'check_in' ? 'Check In' : 'Check Out'
   useEffect(() => {
     const onKey = event => { if (event.key === 'Escape') onClose() }
@@ -256,12 +254,6 @@ export function AdminPhotoModal({ viewer, onClose }) {
       })
     return () => { cancelled = true }
   }, [viewer.attendanceId])
-  useEffect(() => {
-    if (!note) return undefined
-    const delay = new Date(note.expires_at).getTime() - Date.now()
-    const timer = window.setTimeout(() => setNoteExpiryTick(Date.now()), Math.max(delay, 0))
-    return () => window.clearTimeout(timer)
-  }, [note])
   return (
     <div className="photo-capture-overlay admin-photo-modal" role="dialog" aria-modal="true" aria-label={`${eventLabel} attendance photo`} onClick={event => { if (event.target === event.currentTarget) onClose() }}>
       <div className="photo-capture-card admin-photo-card">
@@ -271,7 +263,7 @@ export function AdminPhotoModal({ viewer, onClose }) {
         {loading && <div className="admin-photo-loading">Loading photo...</div>}
         {error && <div className="error-box"><X size={16}/>{error}</div>}
         {url && <img src={url} alt={`${eventLabel} attendance photo for ${viewer.employee}`} />}
-        {activeNote && <aside className="admin-attendance-note"><span className="eyebrow cyan">TEMPORARY ATTENDANCE NOTE</span><p>{activeNote.content}</p><small>{activeNote.employee_name} · {formatIndiaDate(activeNote.date)}</small></aside>}
+        {note && <aside className="admin-attendance-note"><span className="eyebrow cyan">ATTENDANCE NOTE</span><p>{note.content}</p><small>{note.employee_name} · {formatIndiaDate(note.date)}</small></aside>}
         {noteError && <div className="error-box" role="alert"><X size={16}/>{noteError}</div>}
         <button className="ghost-button admin-photo-close" type="button" onClick={onClose}>Close</button>
       </div>

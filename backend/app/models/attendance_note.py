@@ -1,7 +1,4 @@
-from datetime import datetime, timedelta, timezone
-
-
-NOTE_LIFETIME = timedelta(hours=24)
+from datetime import datetime, timezone
 
 
 def attendance_note_document(employee_id: str, attendance_date: str, content: str, now: datetime | None = None) -> dict:
@@ -15,7 +12,6 @@ def attendance_note_document(employee_id: str, attendance_date: str, content: st
         "date": attendance_date,
         "content": content,
         "created_at": created_at,
-        "expires_at": created_at + NOTE_LIFETIME,
         "updated_at": created_at,
     }
 
@@ -25,5 +21,4 @@ def public_attendance_note(document: dict) -> dict:
         "date": document["date"],
         "content": document["content"],
         "created_at": document["created_at"],
-        "expires_at": document["expires_at"],
     }
