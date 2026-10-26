@@ -9,6 +9,7 @@ from openpyxl.drawing.image import Image as ExcelImage
 from PIL import Image
 from app.core.security import require_admin
 from app.db.mongodb import get_db
+from app.models.employee import active_employee_accounts
 from app.services.photo_service import PhotoUnavailableError, open_photo
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -142,24 +143,21 @@ def export_attendance(
     start_date, end_date = resolve_export_date_range(export_range, anchor_date, start_date, end_date)
 
     db = get_db()
+    active_employees = active_employee_accounts(
+        db.employees,
+        {"employee_id": 1, "full_name": 1, "email": 1, "department": 1},
+    )
+    active_employee_ids = {employee["employee_id"] for employee in active_employees}
     records = list(db.attendance.find(
         {"date": {"$gte": start_date.isoformat(), "$lte": end_date.isoformat()}},
         {"_id": 0},
     ).sort([("date", -1), ("employee_id", 1)]))
-    active_employees = list(db.employees.find(
-        {"role": "employee", "is_active": True},
-        {"employee_id": 1, "full_name": 1, "email": 1, "department": 1},
-    ))
+    records = [record for record in records if record.get("employee_id") in active_employee_ids]
     active_employees.sort(key=lambda employee: employee.get("employee_id") or "")
-    employee_ids = {record.get("employee_id") for record in records}
     employees = {
         employee["employee_id"]: employee
-        for employee in db.employees.find(
-            {"employee_id": {"$in": list(employee_ids)}},
-            {"employee_id": 1, "full_name": 1, "email": 1, "department": 1},
-        )
+        for employee in active_employees
     }
-    employees.update({employee["employee_id"]: employee for employee in active_employees})
 
     records_by_employee_date = {}
     for record in records:
@@ -186,8 +184,6 @@ def export_attendance(
                     "final_status": "ABSENT",
                 })
 
-    for remaining_records in records_by_employee_date.values():
-        export_records.extend(remaining_records)
     export_records.sort(key=lambda record: str(record.get("employee_id") or ""))
     export_records.sort(key=lambda record: str(record.get("date") or ""), reverse=True)
 

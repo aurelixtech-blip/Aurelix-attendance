@@ -2,6 +2,18 @@ from datetime import datetime, timezone
 from typing import Any
 from bson import ObjectId
 
+ACTIVE_EMPLOYEE_QUERY = {"role": "employee", "is_active": True}
+SYSTEM_ADMIN_EMPLOYEE_ID = "ADM-001"
+
+
+def active_employee_accounts(employees, projection=None) -> list[dict[str, Any]]:
+    # The protected System Admin ID must never become an employee through role-data drift.
+    return [
+        employee
+        for employee in employees.find(ACTIVE_EMPLOYEE_QUERY, projection)
+        if employee.get("employee_id") != SYSTEM_ADMIN_EMPLOYEE_ID
+    ]
+
 
 def employee_document(employee_id: str, full_name: str, email: str, department: str, role: str, password_hash: str, recovery_email: str | None = None) -> dict[str, Any]:
     now = datetime.now(timezone.utc)

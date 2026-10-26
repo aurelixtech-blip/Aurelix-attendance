@@ -3,7 +3,7 @@ from app.api.deps import current_employee
 from app.core.rate_limit import limiter
 from app.core.security import create_access_token, require_admin, verify_password
 from app.db.mongodb import get_db
-from app.models.employee import public_employee
+from app.models.employee import SYSTEM_ADMIN_EMPLOYEE_ID, public_employee
 from app.models.audit import audit_event
 from app.schemas.auth import LoginRequest, TokenResponse
 from app.schemas.password_recovery import PasswordRecoveryRequest, PasswordRecoveryReset, PasswordRecoveryVerify, RecoveryEmailVerification
@@ -20,6 +20,10 @@ def login(payload: LoginRequest):
         raise HTTPException(status_code=401, detail="Incorrect email or password.")
     if not employee.get("is_active", True):
         raise HTTPException(status_code=403, detail="Employee account is inactive")
+    if employee.get("role") not in {"admin", "employee"}:
+        raise HTTPException(status_code=403, detail="Account role is invalid. Contact an administrator.")
+    if employee.get("employee_id") == SYSTEM_ADMIN_EMPLOYEE_ID and employee.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="System Admin account must have the admin role. Contact an administrator.")
     db.audit_logs.insert_one(audit_event("LOGIN_SUCCESS", employee["employee_id"], "ACCEPTED"))
     return {"access_token": create_access_token(employee["employee_id"], employee["role"], employee.get("auth_version", 0)), "user": public_employee(employee)}
 

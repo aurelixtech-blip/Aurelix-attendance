@@ -349,7 +349,7 @@ def test_admin_can_retrieve_photo(monkeypatch):
         clear_overrides()
 
 
-def test_admin_attendance_includes_records_with_missing_employees(monkeypatch):
+def test_admin_attendance_excludes_records_with_missing_employees(monkeypatch):
     attendance_record = {
         "attendance_id": "att-missing-employee",
         "employee_id": "EMP-REMOVED",
@@ -390,10 +390,7 @@ def test_admin_attendance_includes_records_with_missing_employees(monkeypatch):
         response = client.get("/api/attendance/admin?date=2026-09-24")
 
         assert response.status_code == 200
-        records = response.json()
-        assert len(records) == 1
-        assert records[0]["attendance_id"] == "att-missing-employee"
-        assert records[0]["employee"] == {"full_name": "Former Employee", "department": ""}
+        assert response.json() == []
     finally:
         clear_overrides()
 

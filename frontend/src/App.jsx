@@ -93,7 +93,7 @@ async function exportErrorMessage(error) {
 function loginErrorMessage(error) {
   if (!error.response) return 'Unable to sign in right now. Please check your connection.'
   if (error.response.status === 401) return 'Email or password not recognized. Check your credentials or use Forgot password.'
-  if (error.response.status === 403) return 'This account is inactive. Contact an administrator for help.'
+  if (error.response.status === 403) return error.response.data?.detail?.includes('role') ? error.response.data.detail : 'This account is inactive. Contact an administrator for help.'
   if (error.response.status === 422) return 'Enter a valid work email and password, then try again.'
   if (error.response.status === 429) return 'Too many sign-in attempts. Wait a moment and try again.'
   return 'Sign-in service is temporarily unavailable. Please try again later.'
@@ -107,12 +107,12 @@ function Shell({ user, onLogout, children }) {
   return <div className="app-shell"><aside className="sidebar"><div className="brand"><Logo /></div><div className="workspace-label">Workspace / {isAdmin ? 'Operations' : 'Employee'}</div><nav>{links.map(([path, Icon, label]) => <button className={location.pathname === path ? 'nav-item active' : 'nav-item'} onClick={() => navigate(path)} key={path}><Icon size={17}/>{label}</button>)}</nav><div className="sidebar-bottom"><div className="user-chip"><span className="avatar">{user.full_name?.slice(0, 1)}</span><span><b>{user.full_name}</b><small>{user.department}</small></span></div><button className="nav-item" onClick={onLogout}><LogOut size={17}/>Sign out</button></div></aside><main className="main-content"><header className="topbar"><div><span className="eyebrow">AURELIX / {isAdmin ? 'OPERATIONS' : 'PERSONAL SPACE'}</span><h1>{isAdmin ? 'Attendance command center' : 'Good to see you, ' + user.full_name.split(' ')[0]}</h1></div><span className="secure-pill"><ShieldCheck size={14}/> Secure session</span></header>{children}</main></div>
 }
 
-export function Login({ onLogin }) {
+export function Login({ onLogin, initialError = '' }) {
   const [form, setForm] = useState({ email: '', password: '' })
   const [passwordVisible, setPasswordVisible] = useState(false)
   const [screen, setScreen] = useState('login')
   const [recovery, setRecovery] = useState({ recovery_email: '', otp: '', challengeToken: '', resetToken: '', maskedEmail: '' })
-  const [error, setError] = useState('')
+  const [error, setError] = useState(initialError)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
@@ -131,6 +131,10 @@ export function Login({ onLogin }) {
     setBusy(true)
     try {
       const { data } = await api.post('/api/auth/login', form)
+      if (!data.access_token || !['admin', 'employee'].includes(data.user?.role)) {
+        setError('Your account role is invalid. Contact an administrator.')
+        return
+      }
       localStorage.setItem('aurelix_token', data.access_token)
       onLogin(data.user)
       navigate(data.user.role === 'admin' ? '/admin' : '/attendance')
@@ -644,9 +648,26 @@ function EmployeeEditor({ user, onLogout }) {
 export default function App() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
-  useEffect(() => { if (localStorage.getItem('aurelix_token')) api.get('/api/auth/me').then(({ data }) => setUser(data)).catch(() => localStorage.removeItem('aurelix_token')).finally(() => setLoading(false)); else setLoading(false) }, [])
+  const [sessionError, setSessionError] = useState('')
+  useEffect(() => {
+    if (!localStorage.getItem('aurelix_token')) {
+      setLoading(false)
+      return
+    }
+    api.get('/api/auth/me').then(({ data }) => {
+      if (!['admin', 'employee'].includes(data?.role)) {
+        localStorage.removeItem('aurelix_token')
+        setSessionError('Your account role is missing or invalid. Contact an administrator.')
+        return
+      }
+      setUser(data)
+    }).catch(error => {
+      localStorage.removeItem('aurelix_token')
+      setSessionError(error.response?.data?.detail || '')
+    }).finally(() => setLoading(false))
+  }, [])
   if (loading) return <div className="loading">Loading secure workspace...</div>
-  if (!user) return <Routes><Route path="*" element={<Login onLogin={setUser}/>}/></Routes>
+  if (!user) return <Routes><Route path="*" element={<Login onLogin={setUser} initialError={sessionError}/>}/></Routes>
   const logout = () => { localStorage.removeItem('aurelix_token'); setUser(null) }
-  return <Shell user={user} onLogout={logout}><Routes><Route path="/" element={<Navigate to={user.role === 'admin' ? '/admin' : '/attendance'} replace/>}/><Route path="/attendance" element={<LocationAttendance/>}/><Route path="/history" element={<EmployeeAttendanceHistory/>}/><Route path="/admin" element={user.role === 'admin' ? <AdminDashboard/> : <Navigate to="/attendance"/>}/><Route path="/admin/employees" element={user.role === 'admin' ? <EmployeeEditor user={user} onLogout={logout}/> : <Navigate to="/attendance"/>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></Shell>
+  return <Shell user={user} onLogout={logout}><Routes><Route path="/" element={<Navigate to={user.role === 'admin' ? '/admin' : '/attendance'} replace/>}/><Route path="/attendance" element={user.role === 'employee' ? <LocationAttendance/> : <Navigate to="/admin" replace/>}/><Route path="/history" element={user.role === 'employee' ? <EmployeeAttendanceHistory/> : <Navigate to="/admin" replace/>}/><Route path="/admin" element={user.role === 'admin' ? <AdminDashboard/> : <Navigate to="/attendance" replace/>}/><Route path="/admin/employees" element={user.role === 'admin' ? <EmployeeEditor user={user} onLogout={logout}/> : <Navigate to="/attendance" replace/>}/><Route path="*" element={<Navigate to="/" replace/>}/></Routes></Shell>
 }

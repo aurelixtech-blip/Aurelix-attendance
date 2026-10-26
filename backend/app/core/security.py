@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from app.core.config import get_settings
 from app.db.mongodb import get_db
+from app.models.employee import SYSTEM_ADMIN_EMPLOYEE_ID
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -36,9 +37,17 @@ def current_claims(token: str = Depends(oauth2_scheme)) -> dict:
     claims = decode_access_token(token)
     if not claims.get("sub"):
         raise HTTPException(status_code=401, detail="Invalid authentication token")
-    employee = get_db().employees.find_one({"employee_id": claims["sub"]}, {"auth_version": 1})
+    employee = get_db().employees.find_one(
+        {"employee_id": claims["sub"]},
+        {"auth_version": 1, "role": 1, "employee_id": 1},
+    )
     if not employee or claims.get("auth_version", 0) != employee.get("auth_version", 0):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    role = employee.get("role")
+    if role not in {"admin", "employee"} or claims.get("role") != role:
+        raise HTTPException(status_code=401, detail="Invalid authentication token: account role is missing or inconsistent.")
+    if employee.get("employee_id") == SYSTEM_ADMIN_EMPLOYEE_ID and role != "admin":
+        raise HTTPException(status_code=403, detail="System Admin account must have the admin role. Contact an administrator.")
     return claims
 
 

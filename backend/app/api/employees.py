@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pymongo.errors import DuplicateKeyError
 from app.core.security import require_admin, hash_password
 from app.db.mongodb import get_db
-from app.models.employee import admin_employee, employee_document
+from app.models.employee import SYSTEM_ADMIN_EMPLOYEE_ID, admin_employee, employee_document
 from app.models.audit import audit_event
 from app.schemas.employee import EmployeeCreate, EmployeeUpdate
 from app.services.password_recovery import request_recovery_email_verification
@@ -67,9 +67,9 @@ def update_employee(employee_id: str, payload: EmployeeUpdate, claims: dict = De
     employee = db.employees.find_one({"employee_id": employee_id})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    if employee.get("employee_id") == "ADM-001" and payload.employee_id != "ADM-001":
+    if employee.get("employee_id") == SYSTEM_ADMIN_EMPLOYEE_ID and payload.employee_id != SYSTEM_ADMIN_EMPLOYEE_ID:
         raise HTTPException(status_code=400, detail="The original System Admin employee ID cannot be changed.")
-    if employee.get("employee_id") == "ADM-001" and payload.role != "admin":
+    if employee.get("employee_id") == SYSTEM_ADMIN_EMPLOYEE_ID and payload.role != "admin":
         raise HTTPException(status_code=400, detail="The original System Admin role cannot be changed.")
     id_conflict = db.employees.find_one({"employee_id": payload.employee_id, "_id": {"$ne": employee["_id"]}})
     email_conflict = db.employees.find_one({"email": payload.email.lower(), "_id": {"$ne": employee["_id"]}})
@@ -115,7 +115,7 @@ def remove_employee(employee_id: str, claims: dict = Depends(require_admin)):
     employee = db.employees.find_one({"employee_id": employee_id})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    if employee.get("employee_id") == "ADM-001":
+    if employee.get("employee_id") == SYSTEM_ADMIN_EMPLOYEE_ID:
         raise HTTPException(status_code=400, detail="The original System Admin account cannot be removed.")
     if claims["sub"] == employee.get("employee_id"):
         raise HTTPException(status_code=400, detail="You cannot remove your own account.")

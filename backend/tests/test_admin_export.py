@@ -210,7 +210,7 @@ def test_custom_export_requires_both_dates(monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_export_keeps_existing_inactive_and_missing_employee_records(monkeypatch):
+def test_export_excludes_inactive_and_missing_employee_records(monkeypatch):
     records = [
         record("2026-09-23", "EMP-INACTIVE", user_name="Inactive Person"),
         record("2026-09-23", "EMP-MISSING", user_name="Former Person"),
@@ -225,11 +225,33 @@ def test_export_keeps_existing_inactive_and_missing_employee_records(monkeypatch
         sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
         rows = {row[2]: row for row in sheet.iter_rows(min_row=2, values_only=True)}
 
-        assert rows["EMP-INACTIVE"][3] == "Inactive Employee"
-        assert rows["EMP-INACTIVE"][13] == "PRESENT"
-        assert rows["EMP-MISSING"][3] == "Former Person"
-        assert rows["EMP-MISSING"][13] == "PRESENT"
+        assert "EMP-INACTIVE" not in rows
+        assert "EMP-MISSING" not in rows
         assert rows["EMP-1"][13] == rows["EMP-2"][13] == "ABSENT"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_export_excludes_admin_only_accounts_and_keeps_genuine_employee_absence(monkeypatch):
+    attendance_records = [
+        record("2026-09-23", "ADM-001", user_name="System Admin"),
+        record("2026-09-23", "EMP-1"),
+    ]
+    employee_records = [
+        {"employee_id": "ADM-001", "full_name": "System Admin", "email": "admin@example.com", "department": "Operations", "role": "employee", "is_active": True},
+        {"employee_id": "ADM-002", "full_name": "Additional Admin", "email": "admin-2@example.com", "department": "Operations", "role": "admin", "is_active": True},
+        {"employee_id": "EMP-1", "full_name": "Asha Rao", "email": "asha@example.com", "department": "Operations", "role": "employee", "is_active": True},
+        {"employee_id": "EMP-2", "full_name": "Dev Patel", "email": "dev@example.com", "department": "Engineering", "role": "employee", "is_active": True},
+    ]
+    attendance_records.append(record("2026-09-23", "ADM-002", user_name="Additional Admin"))
+    client, _attendance = export_client(monkeypatch, attendance_records, employee_records)
+    try:
+        sheet = read_sheet(client.get("/api/admin/export", params={"range": "day", "date": "2026-09-23"}))
+        rows = {row[2]: row for row in sheet.iter_rows(min_row=2, values_only=True)}
+
+        assert set(rows) == {"EMP-1", "EMP-2"}
+        assert rows["EMP-1"][13] == "PRESENT"
+        assert rows["EMP-2"][13] == "ABSENT"
     finally:
         app.dependency_overrides.clear()
 

@@ -8,6 +8,7 @@ from app.core.security import require_admin
 from app.db.mongodb import get_db
 from app.models.attendance import public_attendance
 from app.models.audit import audit_event
+from app.models.employee import active_employee_accounts
 from app.schemas.attendance import AttendanceResponse, VerificationRequest
 from app.services.attendance_service import verify_and_record
 from app.services.photo_service import PENDING_ATTENDANCE_ID, PhotoUnavailableError, bind_photo_to_attendance, delete_photo, open_photo, prepare_photo, store_photo
@@ -143,31 +144,50 @@ def undo_my_check_out(attendance_id: str, employee: dict = Depends(current_emplo
 
 @router.get("/admin")
 def all_attendance(_claims: dict = Depends(require_admin), date: str | None = Query(default=None), employee_id: str | None = Query(default=None), status: str | None = Query(default=None)):
-    query = {key: value for key, value in (("date", date), ("employee_id", employee_id), ("final_status", status)) if value}
+    query = {key: value for key, value in (("date", date), ("employee_id", employee_id)) if value}
     records = []
     db = get_db()
-    for item in db.attendance.find(query).sort("date", -1).limit(500):
+    employees = active_employee_accounts(db.employees, {"password_hash": 0})
+    employees.sort(key=lambda employee: employee.get("full_name", ""))
+    employee_by_id = {employee["employee_id"]: employee for employee in employees}
+    if employee_id:
+        if employee_id not in employee_by_id:
+            return []
+    else:
+        query["employee_id"] = {"$in": list(employee_by_id)}
+    if status and not date:
+        query["final_status"] = status
+    attendance_records = db.attendance.find(query).sort("date", -1)
+    if not date:
+        attendance_records = attendance_records.limit(500)
+    for item in attendance_records:
+        employee = employee_by_id.get(item["employee_id"])
+        if not employee:
+            continue
         record = public_attendance(item)
-        employee = db.employees.find_one({"employee_id": item["employee_id"]}, {"password_hash": 0})
-        record["employee"] = (
-            {"full_name": employee.get("full_name"), "department": employee.get("department")}
-            if employee
-            else {"full_name": record.get("user_name") or record.get("employee_id"), "department": ""}
-        )
+        record["employee"] = {"full_name": employee.get("full_name"), "department": employee.get("department")}
         records.append(record)
     if date and not employee_id:
         existing = {item["employee_id"] for item in records}
-        for employee in db.employees.find({"role": "employee", "is_active": True}, {"password_hash": 0}).sort("full_name", 1):
+        for employee in employees:
             if employee["employee_id"] in existing:
                 continue
             records.append({"attendance_id": f"absent-{employee['employee_id']}-{date}", "employee_id": employee["employee_id"], "user_name": employee.get("full_name"), "date": date, "check_in_time": None, "check_in_location": None, "check_in_photo_available": False, "check_out_time": None, "check_out_location": None, "check_out_photo_available": False, "final_status": "ABSENT", "employee": {"full_name": employee["full_name"], "department": employee.get("department", "")}})
         records.sort(key=lambda item: (item.get("employee") or {}).get("full_name", ""))
-    return records
+    return [record for record in records if not status or record.get("final_status") == status]
 
 @router.get("/admin/month")
 def attendance_month(month: str = Query(..., pattern=r"^\d{4}-\d{2}$"), _claims: dict = Depends(require_admin)):
     year, month_number = month.split("-", 1)
-    records = get_db().attendance.find({"date": {"$regex": f"^{year}-{month_number}-"}}, {"_id": 0, "employee_id": 1, "date": 1, "final_status": 1})
+    db = get_db()
+    employee_ids = [
+        employee["employee_id"]
+        for employee in active_employee_accounts(db.employees, {"employee_id": 1})
+    ]
+    records = db.attendance.find(
+        {"date": {"$regex": f"^{year}-{month_number}-"}, "employee_id": {"$in": employee_ids}},
+        {"_id": 0, "employee_id": 1, "date": 1, "final_status": 1},
+    )
     return list(records)
 
 @router.post("/admin/{attendance_id}/undo-check-in")
@@ -198,6 +218,18 @@ def attendance_photo(attendance_id: str, event: str = Query(..., pattern=r"^(che
 def dashboard(_claims: dict = Depends(require_admin)):
     today = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Kolkata")).date().isoformat()
     db = get_db()
-    total = db.employees.count_documents({"role": "employee", "is_active": True})
-    present = db.attendance.count_documents({"date": today, "final_status": "PRESENT"})
+    employee_ids = {
+        employee["employee_id"]
+        for employee in active_employee_accounts(db.employees, {"employee_id": 1})
+    }
+    total = len(employee_ids)
+    present_ids = {
+        record["employee_id"]
+        for record in db.attendance.find({
+            "date": today,
+            "final_status": "PRESENT",
+            "employee_id": {"$in": list(employee_ids)},
+        }, {"employee_id": 1})
+    }
+    present = len(present_ids)
     return {"total_employees": total, "present_today": present, "absent_today": max(total - present, 0), "late_today": 0, "rejected_attempts": 0}
